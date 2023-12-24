@@ -1,0 +1,78 @@
+/* Style global */
+body {
+    background-color: #202020; /* Fond plus sombre */
+    color: #f1f1f1; /* Texte plus clair */
+    font-family: "Segoe UI", Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* En-tête */
+h1 {
+    color: #4caf50; /* Couleur vive pour le titre */
+    text-align: center;
+    margin-top: 50px;
+}
+
+/* Style du formulaire */
+form {
+    display: flex;
+    justify-content: center;
+    margin-top: 20px;
+}
+
+input[type="text"] {
+    width: 300px;
+    padding: 10px;
+    border: none;
+    border-radius: 5px 0 0 5px;
+    font-size: 16px;
+}
+
+input[type="submit"] {
+    padding: 10px;
+    border: none;
+    border-radius: 0 5px 5px 0;
+    background-color: #4caf50; /* Couleur du bouton */
+    color: #ffffff;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+input[type="submit"]:hover {
+    background-color: #43a047; /* Couleur du bouton au survol */
+}
+
+/* Style du tableau */
+.table-container {
+    width: 80%;
+    margin: 20px auto;
+}
+
+table.results {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+table.results th, table.results td {
+    border: 1px solid #444444;
+    padding: 10px;
+    text-align: center;
+}
+
+table.results th {
+    background-color: #333333;
+    color: white;
+}
+
+/* Style des liens */
+a {
+    color: #91be15; /* Couleur des liens */
+    text-decoration: none;
+}
+
+a:hover {
+    color: #ba68c8; /* Couleur des liens au survol */
+}
