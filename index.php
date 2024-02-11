@@ -1,5 +1,4 @@
 <?php
-// Lire le fichier .env
 $env = parse_ini_file('.env');
 
 function searchProwlarr($query, $apiKey, $baseUrl) {
@@ -16,34 +15,37 @@ function searchProwlarr($query, $apiKey, $baseUrl) {
 
 $results = [];
 $searchTerm = '';
+$tri = $_GET['tri'] ?? null; // Nouveau ou 'seeders' par défaut si vous voulez
+$ordre = $_GET['ordre'] ?? 'desc'; // 'desc' par défaut
 
 if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['search']) && !empty($_GET['search'])) {
     $searchTerm = $_GET['search'];
 
-    // Effectuer la recherche et rediriger
     if (!isset($_GET['redirected'])) {
         $results = searchProwlarr($searchTerm, $env['PROWLARR_API_KEY'], $env['PROWLARR_BASE_URL']);
 
         if (!empty($results)) {
-            usort($results, function($a, $b) {
-                return $b['seeders'] - $a['seeders'];
+            usort($results, function($a, $b) use ($tri, $ordre) {
+                $valA = $a[$tri] ?? 0; // Utiliser 0 comme valeur par défaut si l'indice n'existe pas
+                $valB = $b[$tri] ?? 0;
+                if ($ordre === 'asc') {
+                    return $valA <=> $valB;
+                } else { // 'desc' par défaut
+                    return $valB <=> $valA;
+                }
             });
         }
 
         session_start();
-        $_SESSION['results'] = $results; // Stocker les résultats dans la session
-        header("Location: index.php?search=" . urlencode($searchTerm) . "&redirected=1");
+        $_SESSION['results'] = $results;
+        header("Location: index.php?search=" . urlencode($searchTerm) . "&tri=" . $tri . "&ordre=" . $ordre . "&redirected=1");
         exit;
-    }
-    // Charger les résultats à partir de la session après la redirection
-    else {
+    } else {
         session_start();
         if (isset($_SESSION['results'])) {
             $results = $_SESSION['results'];
         }
     }
-        // Afficher les données pour le débogage
-        #echo '<pre>'; var_dump($results); echo '</pre>';
 }
 ?>
 
@@ -62,14 +64,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['search']) && !empty($_GE
     </form>
 
     <?php if (!empty($results)): ?>
-    <h2></h2>
     <div class="table-container">
         <table class="results">
             <thead>
                 <tr>
-                    <th>Source</th> <!-- Nouvelle colonne pour les initiales du tracker -->
+                    <th>Source</th>
                     <th>Titre</th>
-                    <th>Seeders</th>
+                    <th><a href="?search=<?php echo urlencode($searchTerm); ?>&tri=size&ordre=<?php echo $tri === 'size' && $ordre === 'desc' ? 'asc' : 'desc'; ?>">Taille</a></th>
+                    <th><a href="?search=<?php echo urlencode($searchTerm); ?>&tri=seeders&ordre=<?php echo $tri === 'seeders' && $ordre === 'desc' ? 'asc' : 'desc'; ?>">Seeders</a></th>
                     <th>Action</th>
                 </tr>
             </thead>
@@ -78,6 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['search']) && !empty($_GE
                     <tr>
                         <td><?php echo htmlspecialchars($result['indexer'] ?? 'N/A'); ?></td>
                         <td><a href="<?php echo htmlspecialchars($result['infoUrl']); ?>" target="_blank"><?php echo htmlspecialchars($result['title']); ?></a></td>
+                        <td><?php echo htmlspecialchars(number_format($result['size'] / (1024**3), 2)) . ' GB'; ?></td>
                         <td><?php echo htmlspecialchars($result['seeders']); ?></td>
                         <td><a href="download.php?url=<?php echo urlencode($result['downloadUrl']); ?>">Télécharger</a></td>
                     </tr>
@@ -85,6 +88,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['search']) && !empty($_GE
             </tbody>
         </table>
     </div>
-<?php endif; ?>
+    <?php endif; ?>
 </body>
 </html>
