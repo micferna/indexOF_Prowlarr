@@ -1,4 +1,5 @@
 <?php
+// Lire le fichier .env
 $env = parse_ini_file('.env');
 
 function searchProwlarr($query, $apiKey, $baseUrl) {
