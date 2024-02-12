@@ -58,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['search']) && !empty($_GE
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <h1>Recherche de fichiers</h1>
+    <h1></h1>
     <form action="index.php" method="get">
         <input type="text" name="search" placeholder="Nom du fichier" value="<?php echo htmlspecialchars($searchTerm); ?>">
         <button type="submit">Rechercher</button>
