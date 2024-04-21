@@ -50,6 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['search']) && !empty($_GE
 }
 ?>
 
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -98,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['search']) && !empty($_GE
                                 <td class="px-4 py-2"><a href="<?php echo htmlspecialchars($result['infoUrl']); ?>" target="_blank" class="text-blue-300 hover:underline"><?php echo htmlspecialchars($result['title']); ?></a></td>
                                 <td class="px-4 py-2 whitespace-nowrap"><?php echo htmlspecialchars(number_format($result['size'] / (1024**3), 2)) . ' GB'; ?></td>
                                 <td class="px-4 py-2"><?php echo htmlspecialchars($result['seeders']); ?></td>
-                                <td class="px-4 py-2"><a href="download.php?url=<?php echo urlencode($result['downloadUrl']); ?>" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition duration-300 ease-in-out download-btn">Télécharger</a></td>
+                                <td class="px-4 py-2"><a href="download_torrent.php?url=<?php echo urlencode($result['downloadUrl']); ?>" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition duration-300 ease-in-out download-btn">Télécharger</a></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
