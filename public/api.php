@@ -5,8 +5,9 @@ declare(strict_types=1);
 /**
  * API JSON consommée par le front (recherche dynamique sans rechargement).
  *
+ *   GET api.php?action=status
  *   GET api.php?action=indexers
- *   GET api.php?action=search&q=...&days=1&trackers=1,2
+ *   GET api.php?action=search&q=...&days=1&trackers=1,2&cats=2000,5000
  *
  * Les liens de téléchargement sont signés (HMAC) côté serveur : le secret ne
  * quitte jamais le backend.
@@ -14,7 +15,9 @@ declare(strict_types=1);
 
 require __DIR__ . '/../src/config.php';
 require __DIR__ . '/../src/functions.php';
+require __DIR__ . '/../src/auth.php';
 require __DIR__ . '/../src/ProwlarrClient.php';
+require __DIR__ . '/../src/QbittorrentClient.php';
 
 $config = load_config();
 
@@ -22,6 +25,8 @@ header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: no-referrer');
 header('Cache-Control: no-store');
+
+require_auth($config, 'json');
 
 /**
  * @param array<string,mixed> $data
@@ -57,33 +62,51 @@ function map_result(array $r, string $secret): array
         }
     }
 
+    // Couple signé pour le téléchargement (proxy navigateur ET envoi qBittorrent).
+    $dl = null;
     if ($http !== '') {
-        // Téléchargement .torrent via le proxy signé (résout aussi les liens proxy Prowlarr).
-        $action = [
-            'type' => 'torrent',
-            'href' => 'download_torrent.php?' . http_build_query([
-                'url' => $http,
-                'sig' => sign_url($http, $secret),
-            ]),
-        ];
-    } elseif ($magnet !== '') {
-        $action = ['type' => 'magnet', 'href' => $magnet];
-    } else {
-        $action = ['type' => null, 'href' => null];
+        $dl = ['url' => $http, 'sig' => sign_url($http, $secret)];
+    }
+
+    $title = (string) ($r['title'] ?? 'N/A');
+
+    // Catégorie la plus parlante (première de la liste).
+    $category = '';
+    if (!empty($r['categories']) && is_array($r['categories'])) {
+        $first = $r['categories'][0] ?? null;
+        if (is_array($first)) {
+            $category = (string) ($first['name'] ?? '');
+        }
+    }
+
+    // Freeleech via les flags d'indexeur.
+    $freeleech = false;
+    if (!empty($r['indexerFlags']) && is_array($r['indexerFlags'])) {
+        foreach ($r['indexerFlags'] as $flag) {
+            if (stripos((string) $flag, 'freeleech') !== false) {
+                $freeleech = true;
+                break;
+            }
+        }
     }
 
     $size = (int) ($r['size'] ?? 0);
 
     return [
         'indexer'     => (string) ($r['indexer'] ?? 'N/A'),
-        'title'       => (string) ($r['title'] ?? 'N/A'),
+        'title'       => $title,
         'infoUrl'     => safe_url($r['infoUrl'] ?? null),
         'size'        => $size,
         'sizeHuman'   => format_size($size),
         'seeders'     => (int) ($r['seeders'] ?? 0),
+        'leechers'    => (int) ($r['leechers'] ?? 0),
         'publishDate' => (string) ($r['publishDate'] ?? ''),
         'daysOld'     => days_since($r['publishDate'] ?? null),
-        'action'      => $action,
+        'category'    => $category,
+        'badges'      => quality_badges($title),
+        'freeleech'   => $freeleech,
+        'magnet'      => $magnet !== '' ? $magnet : null,
+        'dl'          => $dl,
     ];
 }
 
@@ -98,6 +121,23 @@ $client = new ProwlarrClient(
 $action = (string) ($_GET['action'] ?? 'search');
 
 try {
+    if ($action === 'status') {
+        $count = null;
+        $connected = false;
+        try {
+            $count = count($client->indexers());
+            $connected = true;
+        } catch (Throwable $e) {
+            $connected = false;
+        }
+        json_out([
+            'connected'   => $connected,
+            'indexers'    => $count,
+            'qbit'        => QbittorrentClient::isConfigured($config['qbit_url']),
+            'authEnabled' => auth_enabled($config),
+        ]);
+    }
+
     if ($action === 'indexers') {
         json_out(['indexers' => $client->indexers()]);
     }
@@ -105,24 +145,32 @@ try {
     if ($action === 'search') {
         $query = trim((string) ($_GET['q'] ?? ''));
         if ($query === '') {
-            json_out(['query' => '', 'count' => 0, 'results' => []]);
+            json_out(['query' => '', 'count' => 0, 'capped' => false, 'results' => []]);
         }
 
         $allowedDays = [0, 1, 7, 30, 90];
         $days = in_array((int) ($_GET['days'] ?? 1), $allowedDays, true) ? (int) $_GET['days'] : 1;
 
-        $trackers = array_values(array_filter(
-            array_map('intval', explode(',', (string) ($_GET['trackers'] ?? ''))),
-            static fn (int $id): bool => $id > 0
+        $parseIds = static fn (string $raw): array => array_values(array_filter(
+            array_map('intval', explode(',', $raw)),
+            static fn (int $n): bool => $n > 0
         ));
+        $trackers   = $parseIds((string) ($_GET['trackers'] ?? ''));
+        $categories = $parseIds((string) ($_GET['cats'] ?? ''));
 
-        $raw = $client->search($query, $trackers, $days);
+        $limit = (int) $config['limit'];
+        $raw = $client->search($query, $trackers, $days, $categories, $limit);
         $results = array_map(
             static fn (array $r): array => map_result($r, $config['secret']),
             $raw
         );
 
-        json_out(['query' => $query, 'count' => count($results), 'results' => $results]);
+        json_out([
+            'query'   => $query,
+            'count'   => count($results),
+            'capped'  => count($results) >= $limit,
+            'results' => $results,
+        ]);
     }
 
     json_out(['error' => 'Action inconnue.'], 400);

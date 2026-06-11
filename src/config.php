@@ -8,7 +8,9 @@ declare(strict_types=1);
  *
  * @return array{
  *   api_key:string, base_url:string, secret:string,
- *   timeout:int, cache_ttl:int, cache_dir:string
+ *   timeout:int, cache_ttl:int, cache_dir:string,
+ *   password:string, limit:int,
+ *   qbit_url:string, qbit_user:string, qbit_pass:string
  * }
  */
 function load_config(): array
@@ -52,12 +54,20 @@ function load_config(): array
     }
 
     $config = [
-        'api_key'   => $apiKey,
-        'base_url'  => rtrim($baseUrl, '/'),
-        'secret'    => $secret,
-        'timeout'   => max(1, (int) $get('PROWLARR_TIMEOUT', '15')),
-        'cache_ttl' => max(0, (int) $get('CACHE_TTL', '120')),
-        'cache_dir' => $get('CACHE_DIR', sys_get_temp_dir() . '/indexof_cache'),
+        'api_key'    => $apiKey,
+        'base_url'   => rtrim($baseUrl, '/'),
+        'secret'     => $secret,
+        'timeout'    => max(1, (int) $get('PROWLARR_TIMEOUT', '15')),
+        'cache_ttl'  => max(0, (int) $get('CACHE_TTL', '120')),
+        'cache_dir'  => $get('CACHE_DIR', sys_get_temp_dir() . '/indexof_cache'),
+        // Authentification (mot de passe unique). Vide = pas d'auth.
+        'password'   => (string) $get('APP_PASSWORD', ''),
+        // Limite de résultats par page (pagination "charger plus").
+        'limit'      => max(10, (int) $get('RESULT_LIMIT', '100')),
+        // Client qBittorrent (Web API v2). URL vide = fonctionnalité désactivée.
+        'qbit_url'   => rtrim((string) $get('QBITTORRENT_URL', ''), '/'),
+        'qbit_user'  => (string) $get('QBITTORRENT_USER', ''),
+        'qbit_pass'  => (string) $get('QBITTORRENT_PASS', ''),
     ];
 
     return $config;

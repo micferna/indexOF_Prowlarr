@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    name: Lint · PHPStan · Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: curl, json
+          tools: composer
+          coverage: none
+
+      - name: Lint PHP
+        run: find src public tests -name '*.php' -print0 | xargs -0 -n1 -P4 php -l
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: PHPStan
+        run: vendor/bin/phpstan analyse --no-progress
+
+      - name: PHPUnit
+        run: vendor/bin/phpunit
+
+  docker:
+    name: Build · Scan CVE
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare env
+        run: cp exemple.env .env
+
+      - name: Build images
+        run: docker compose build
+
+      - name: Trivy scan (php)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: indexof-prowlarr-php:latest
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Trivy scan (web)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: indexof-prowlarr-web:latest
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true

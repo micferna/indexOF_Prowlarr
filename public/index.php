@@ -2,7 +2,13 @@
 
 declare(strict_types=1);
 
-// Coquille de l'application : aucune donnée sensible ici, tout passe par api.php.
+require __DIR__ . '/../src/config.php';
+require __DIR__ . '/../src/functions.php';
+require __DIR__ . '/../src/auth.php';
+
+$config = load_config();
+require_auth($config, 'html');
+
 header(
     "Content-Security-Policy: default-src 'self'; img-src 'self' data:; "
     . "style-src 'self'; script-src 'self'; connect-src 'self'; "
@@ -11,6 +17,9 @@ header(
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: no-referrer');
 header('X-Frame-Options: DENY');
+
+$csrf = csrf_token();
+$showLogout = auth_enabled($config);
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -18,12 +27,22 @@ header('X-Frame-Options: DENY');
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark">
+    <meta name="csrf" content="<?php echo e($csrf); ?>">
     <title>indexOF · Recherche Prowlarr</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
     <link rel="stylesheet" href="assets/app.css">
 </head>
 <body>
     <div class="aurora" aria-hidden="true"></div>
+
+    <div class="topbar">
+        <span id="status" class="status" title="État de la connexion">
+            <span class="status-dot"></span><span class="status-text">…</span>
+        </span>
+        <?php if ($showLogout): ?>
+            <a href="logout.php" class="logout">Déconnexion</a>
+        <?php endif; ?>
+    </div>
 
     <header class="hero">
         <div class="brand">
@@ -34,10 +53,9 @@ header('X-Frame-Options: DENY');
 
         <form id="search-form" class="command-bar" autocomplete="off">
             <svg class="cb-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 21l-4.3-4.3M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16z"/></svg>
-            <input id="q" name="q" type="search" placeholder="Rechercher un titre…" aria-label="Recherche">
-            <button type="submit" class="btn-primary">
-                <span class="btn-label">Rechercher</span>
-            </button>
+            <input id="q" name="q" type="search" placeholder="Rechercher un titre…" aria-label="Recherche" list="history">
+            <datalist id="history"></datalist>
+            <button type="submit" class="btn-primary"><span class="btn-label">Rechercher</span></button>
         </form>
 
         <div class="controls">
@@ -50,14 +68,13 @@ header('X-Frame-Options: DENY');
             </button>
         </div>
 
+        <div id="categories" class="chips chips-cat" aria-label="Filtrer par catégorie"></div>
         <div id="trackers" class="chips" aria-label="Filtrer par indexeur"></div>
     </header>
 
     <main id="results" class="results" aria-live="polite"></main>
 
-    <noscript>
-        <p style="text-align:center;color:#9aa">JavaScript est requis pour cette application.</p>
-    </noscript>
+    <noscript><p style="text-align:center;color:#9aa">JavaScript est requis pour cette application.</p></noscript>
 
     <script src="assets/app.js" defer></script>
 </body>

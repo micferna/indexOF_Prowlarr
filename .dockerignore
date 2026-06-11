@@ -1,7 +1,14 @@
 .git
+.github
 .gitignore
 .env
 data/
 *.md
 *.log
 .cache/
+vendor/
+tests/
+.phpunit.cache/
+phpunit.xml
+composer.*
+phpstan.neon

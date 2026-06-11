@@ -44,6 +44,22 @@ services:
     networks:
       - indexof
 
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: indexof_qbittorrent
+    restart: unless-stopped
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/Paris
+      WEBUI_PORT: "8080"
+    volumes:
+      - ./data/qbittorrent:/config
+    ports:
+      - "8081:8080"
+    networks:
+      - indexof
+
 networks:
   indexof:
     driver: bridge

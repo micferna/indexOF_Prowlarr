@@ -123,6 +123,45 @@ function format_size(mixed $bytes): string
     return number_format($bytes / (1024 ** $i), 2, ',', ' ') . ' ' . $units[$i];
 }
 
+/**
+ * Extrait des badges de qualité depuis le titre d'une release
+ * (résolution, source, codec, audio, HDR, langue).
+ *
+ * @return array<int,string>
+ */
+function quality_badges(string $title): array
+{
+    $patterns = [
+        '/\b(2160p|4k|uhd)\b/i'                     => '2160p',
+        '/\b1080p\b/i'                              => '1080p',
+        '/\b720p\b/i'                               => '720p',
+        '/\b(480p|sd)\b/i'                          => '480p',
+        '/\bremux\b/i'                              => 'REMUX',
+        '/\b(bluray|blu-ray|bdrip|brrip)\b/i'       => 'BluRay',
+        '/\b(web-?dl|webrip|web)\b/i'               => 'WEB',
+        '/\bhdtv\b/i'                               => 'HDTV',
+        '/\b(x265|h\.?265|hevc)\b/i'                => 'x265',
+        '/\b(x264|h\.?264|avc)\b/i'                 => 'x264',
+        '/\bav1\b/i'                                => 'AV1',
+        '/\b(dolby\s?vision|dovi|\bdv\b)\b/i'       => 'DV',
+        '/\bhdr10?\+?\b/i'                          => 'HDR',
+        '/\b(atmos|truehd)\b/i'                     => 'Atmos',
+        '/\b(dts(-hd)?)\b/i'                        => 'DTS',
+        '/\bflac\b/i'                               => 'FLAC',
+        '/\b(multi|multilang)\b/i'                  => 'MULTI',
+        '/\b(truefrench|vff|vfq|vfi|french)\b/i'    => 'FR',
+        '/\bvostfr\b/i'                             => 'VOSTFR',
+    ];
+
+    $badges = [];
+    foreach ($patterns as $regex => $label) {
+        if (preg_match($regex, $title) && !in_array($label, $badges, true)) {
+            $badges[] = $label;
+        }
+    }
+    return $badges;
+}
+
 /** Nombre de jours écoulés depuis une date ISO, ou null si invalide. */
 function days_since(?string $date): ?int
 {

@@ -387,10 +387,111 @@ body.mask-on .maskable:hover { filter: blur(0); }
     *, ::before, ::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
 
+/* ---------- Topbar / statut / logout ---------- */
+.topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 18px;
+    z-index: 5;
+}
+.status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: 999px;
+    backdrop-filter: blur(8px);
+}
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); box-shadow: 0 0 8px currentColor; }
+.status-dot.ok { background: var(--good); color: var(--good); }
+.status-dot.ko { background: #f87171; color: #f87171; }
+.logout {
+    font-size: 12px; color: var(--muted); text-decoration: none;
+    padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--panel); transition: color 0.2s, border-color 0.2s;
+}
+.logout:hover { color: var(--text); border-color: var(--border-bright); }
+
+/* Catégories : variante accentuée des chips */
+.chips-cat { margin-top: 14px; }
+.chips-cat .chip.active { background: linear-gradient(120deg, var(--cyan), var(--accent)); }
+
+/* ---------- Badges qualité ---------- */
+.badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.badge {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
+    padding: 2px 7px; border-radius: 6px;
+    color: var(--muted); background: var(--panel-2); border: 1px solid var(--border);
+}
+.badge-cat { color: #c9b8ff; background: rgba(124, 131, 255, 0.1); border-color: rgba(124, 131, 255, 0.25); }
+.badge-fl { color: #052; background: var(--good); border-color: var(--good); }
+
+/* ---------- Actions (icônes) ---------- */
+.actions { display: inline-flex; gap: 6px; justify-content: flex-end; }
+.act {
+    display: inline-grid; place-items: center;
+    width: 34px; height: 34px; border-radius: 9px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+    transition: transform 0.12s, filter 0.2s, background 0.2s, border-color 0.2s;
+}
+.act svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.act:hover { transform: translateY(-1px); border-color: var(--border-bright); }
+.act-dl { background: var(--grad); border-color: transparent; color: #fff; }
+.act-qbit:hover { color: var(--cyan); border-color: rgba(56, 225, 212, 0.4); }
+.act.busy { opacity: 0.5; cursor: progress; }
+.act.done { background: var(--good); border-color: var(--good); color: #052; }
+.dl-none { color: var(--faint); }
+
+/* ---------- Charger plus ---------- */
+.load-more {
+    display: block; margin: 18px auto 0; cursor: pointer;
+    padding: 10px 22px; border-radius: 999px; font-size: 14px; font-weight: 600;
+    color: var(--text); background: var(--panel); border: 1px solid var(--border-bright);
+    transition: background 0.2s, transform 0.12s;
+}
+.load-more:hover { background: var(--panel-2); transform: translateY(-1px); }
+
+/* ---------- Toast ---------- */
+.toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 20px);
+    background: rgba(20, 22, 36, 0.95); color: var(--text);
+    border: 1px solid var(--border-bright); border-radius: 12px;
+    padding: 12px 20px; font-size: 14px; font-weight: 500;
+    box-shadow: var(--shadow); opacity: 0; pointer-events: none;
+    transition: opacity 0.25s, transform 0.25s; z-index: 20;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- Page de connexion ---------- */
+.login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
+.login-card {
+    width: 100%; max-width: 360px; text-align: center;
+    display: flex; flex-direction: column; gap: 14px; align-items: center;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 36px 28px; box-shadow: var(--shadow);
+    backdrop-filter: blur(14px);
+}
+.login-card .brand { margin-top: 0; }
+.login-input {
+    width: 100%; padding: 12px 16px; border-radius: 12px;
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    font-size: 15px; outline: none; transition: border-color 0.2s;
+}
+.login-input:focus { border-color: var(--accent); }
+.login-btn { width: 100%; }
+.login-error { color: #ffb4b4; font-size: 13px; margin: -4px 0; }
+
 /* ---------- Responsive ---------- */
-@media (max-width: 640px) {
+@media (max-width: 680px) {
     .table-wrap { overflow-x: auto; }
-    table { min-width: 620px; }
+    table { min-width: 720px; }
     .btn-label { display: none; }
     .btn-primary::after { content: "→"; }
     .cell-title { max-width: 240px; }

@@ -1,0 +1,26 @@
+{
+    "name": "micferna/indexof-prowlarr",
+    "description": "Interface web de recherche pour Prowlarr",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.1",
+        "ext-curl": "*",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "files": ["src/functions.php"],
+        "classmap": ["src/"]
+    },
+    "scripts": {
+        "test": "phpunit",
+        "stan": "phpstan analyse --no-progress"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

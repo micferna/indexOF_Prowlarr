@@ -14,11 +14,14 @@ declare(strict_types=1);
 
 require __DIR__ . '/../src/config.php';
 require __DIR__ . '/../src/functions.php';
+require __DIR__ . '/../src/auth.php';
 
 const MAX_BYTES     = 25 * 1024 * 1024; // 25 Mo
 const MAX_REDIRECTS = 3;
 
 $config = load_config();
+
+require_auth($config, 'html');
 
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: no-referrer');

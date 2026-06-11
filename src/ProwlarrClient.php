@@ -45,24 +45,35 @@ final class ProwlarrClient
      * Recherche de releases.
      *
      * @param array<int,int> $indexerIds  IDs d'indexeurs (vide = tous)
+     * @param array<int,int> $categories  catégories newznab (vide = toutes)
+     * @param int            $limit       cap du nombre de résultats (0 = illimité)
      * @return array<int,array<string,mixed>>
      */
-    public function search(string $query, array $indexerIds = [], int $maxAgeDays = 0): array
-    {
+    public function search(
+        string $query,
+        array $indexerIds = [],
+        int $maxAgeDays = 0,
+        array $categories = [],
+        int $limit = 0
+    ): array {
         $query = trim($query);
         if ($query === '') {
             return [];
         }
 
-        $ids = array_values(array_unique(array_map('intval', $indexerIds)));
+        $ids  = array_values(array_unique(array_map('intval', $indexerIds)));
+        $cats = array_values(array_unique(array_map('intval', $categories)));
 
         // Prowlarr (ASP.NET) attend des clés répétées : indexerIds=1&indexerIds=2.
         $queryString = http_build_query(['query' => $query, 'type' => 'search']);
         foreach ($ids as $id) {
             $queryString .= '&indexerIds=' . $id;
         }
+        foreach ($cats as $cat) {
+            $queryString .= '&categories=' . $cat;
+        }
 
-        $key = 'search_' . md5($query . '|' . implode(',', $ids));
+        $key = 'search_' . md5($query . '|' . implode(',', $ids) . '|' . implode(',', $cats));
         $results = $this->cached($key, function () use ($queryString): array {
             return $this->request('/api/v1/search?' . $queryString);
         });
@@ -73,6 +84,16 @@ final class ProwlarrClient
                 $ts = isset($r['publishDate']) ? strtotime((string) $r['publishDate']) : false;
                 return $ts === false || $ts >= $cutoff;
             }));
+        }
+
+        // Tri par date décroissante pour que le cap conserve les plus récents.
+        usort($results, static function ($a, $b): int {
+            return (strtotime((string) ($b['publishDate'] ?? '')) ?: 0)
+                <=> (strtotime((string) ($a['publishDate'] ?? '')) ?: 0);
+        });
+
+        if ($limit > 0 && count($results) > $limit) {
+            $results = array_slice($results, 0, $limit);
         }
 
         return $results;
