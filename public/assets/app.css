@@ -21,6 +21,9 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* L'attribut hidden doit toujours masquer, même face à un display: flex/grid. */
+[hidden] { display: none !important; }
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {
@@ -428,15 +431,18 @@ body.mask-on .maskable:hover { filter: blur(0); }
 
 .topbar-right { display: inline-flex; align-items: center; gap: 10px; }
 .qbit-cat {
-    display: inline-flex; align-items: center; gap: 6px;
+    display: inline-flex; align-items: center; gap: 5px; height: 30px;
     background: var(--panel); border: 1px solid var(--border);
-    border-radius: 999px; padding: 3px 6px 3px 12px;
+    border-radius: 999px; padding: 0 4px 0 11px; transition: border-color 0.2s;
 }
-.qbit-cat .qbit-ic { width: 14px; height: 14px; fill: none; stroke: var(--cyan); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.qbit-cat:hover { border-color: var(--border-bright); }
+.qbit-cat .qbit-ic { width: 13px; height: 13px; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: stroke 0.2s; }
 .qbit-cat select {
     background: none; border: none; color: var(--muted); font-size: 12px; font-weight: 600;
-    outline: none; cursor: pointer; padding: 4px 4px; border-radius: 999px;
+    outline: none; cursor: pointer; padding: 0 4px; max-width: 160px; transition: color 0.2s;
 }
+.qbit-cat:hover select { color: var(--text); }
+.qbit-cat:hover .qbit-ic { stroke: var(--text); }
 .qbit-cat select option { background: #11131f; color: var(--text); }
 .status-warn { margin-left: 4px; color: var(--mid); font-size: 12px; font-weight: 700; cursor: help; }
 
