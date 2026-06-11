@@ -1,0 +1,49 @@
+services:
+  php:
+    build:
+      context: .
+      target: php
+    image: indexof-prowlarr-php:latest
+    container_name: indexof_php
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CACHE_DIR: /tmp/indexof_cache
+    depends_on:
+      - prowlarr
+    networks:
+      - indexof
+
+  web:
+    build:
+      context: .
+      target: web
+    image: indexof-prowlarr-web:latest
+    container_name: indexof_web
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - php
+    networks:
+      - indexof
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: indexof_prowlarr
+    restart: unless-stopped
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/Paris
+    volumes:
+      - ./data/prowlarr:/config
+    ports:
+      - "9696:9696"
+    networks:
+      - indexof
+
+networks:
+  indexof:
+    driver: bridge

@@ -1,0 +1,120 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Fonctions utilitaires : échappement, validation d'URL (anti-XSS / anti-SSRF),
+ * signature HMAC du proxy de téléchargement, et formatage d'affichage.
+ */
+
+/** Échappement HTML systématique (ENT_QUOTES couvre " et '). */
+function e(?string $value): string
+{
+    return htmlspecialchars($value ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+/**
+ * Renvoie l'URL si son schéma est autorisé, sinon '#'.
+ * Empêche l'injection de liens `javascript:` / `data:` (XSS).
+ *
+ * @param array<int,string> $allowedSchemes
+ */
+function safe_url(?string $url, array $allowedSchemes = ['http', 'https']): string
+{
+    if ($url === null || $url === '') {
+        return '#';
+    }
+    $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+    return in_array($scheme, $allowedSchemes, true) ? $url : '#';
+}
+
+/** Signe une URL pour le proxy de téléchargement. */
+function sign_url(string $url, string $secret): string
+{
+    return hash_hmac('sha256', $url, $secret);
+}
+
+/** Vérifie la signature d'une URL (comparaison à temps constant). */
+function verify_url_signature(string $url, string $signature, string $secret): bool
+{
+    return hash_equals(sign_url($url, $secret), $signature);
+}
+
+/**
+ * Résout un hôte et renvoie une IP publique vérifiée, ou null si aucune.
+ *
+ * L'IP renvoyée sert à épingler la connexion cURL (CURLOPT_RESOLVE) : on se
+ * connecte exactement à l'IP qu'on a validée, ce qui déjoue le DNS rebinding
+ * (la résolution ne peut pas changer entre la vérification et la connexion).
+ * Bloque loopback, plages privées et réservées (anti-SSRF / métadonnées cloud).
+ */
+function resolve_to_public_ip(string $host): ?string
+{
+    // Hôte déjà fourni sous forme d'IP littérale.
+    if (filter_var($host, FILTER_VALIDATE_IP)) {
+        return ip_is_public($host) ? $host : null;
+    }
+
+    $ips = [];
+    $records = @dns_get_record($host, DNS_A | DNS_AAAA);
+    if (is_array($records)) {
+        foreach ($records as $record) {
+            if (isset($record['ip'])) {
+                $ips[] = (string) $record['ip'];
+            }
+            if (isset($record['ipv6'])) {
+                $ips[] = (string) $record['ipv6'];
+            }
+        }
+    }
+    if ($ips === []) {
+        // Repli IPv4 si dns_get_record échoue (certains résolveurs).
+        $ipv4 = gethostbynamel($host);
+        if (is_array($ipv4)) {
+            $ips = $ipv4;
+        }
+    }
+
+    foreach ($ips as $ip) {
+        if (ip_is_public($ip)) {
+            return $ip;
+        }
+    }
+    return null;
+}
+
+/** True si l'IP n'est ni privée ni réservée. */
+function ip_is_public(string $ip): bool
+{
+    return (bool) filter_var(
+        $ip,
+        FILTER_VALIDATE_IP,
+        FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+    );
+}
+
+/** Formate une taille en octets de façon lisible. */
+function format_size(mixed $bytes): string
+{
+    $bytes = (float) ($bytes ?? 0);
+    if ($bytes <= 0) {
+        return 'N/A';
+    }
+    $units = ['o', 'Ko', 'Mo', 'Go', 'To', 'Po'];
+    $i = (int) floor(log($bytes, 1024));
+    $i = max(0, min($i, count($units) - 1));
+    return number_format($bytes / (1024 ** $i), 2, ',', ' ') . ' ' . $units[$i];
+}
+
+/** Nombre de jours écoulés depuis une date ISO, ou null si invalide. */
+function days_since(?string $date): ?int
+{
+    if ($date === null || $date === '') {
+        return null;
+    }
+    $ts = strtotime($date);
+    if ($ts === false) {
+        return null;
+    }
+    return (int) floor((time() - $ts) / 86400);
+}
