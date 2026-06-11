@@ -63,7 +63,7 @@ function load_config(): array
         // Authentification (mot de passe unique). Vide = pas d'auth.
         'password'   => (string) $get('APP_PASSWORD', ''),
         // Limite de résultats par page (pagination "charger plus").
-        'limit'      => max(10, (int) $get('RESULT_LIMIT', '100')),
+        'limit'      => max(10, (int) $get('RESULT_LIMIT', '200')),
         // Client qBittorrent (Web API v2). URL vide = fonctionnalité désactivée.
         'qbit_url'   => rtrim((string) $get('QBITTORRENT_URL', ''), '/'),
         'qbit_user'  => (string) $get('QBITTORRENT_USER', ''),

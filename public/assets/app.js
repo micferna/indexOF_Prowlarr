@@ -39,9 +39,9 @@ function svgIcon(d) {
 }
 
 const state = {
-    query: "", days: 1, trackers: new Set(), cats: new Set(),
+    query: "", days: 0, trackers: new Set(), cats: new Set(),
     sort: { field: "publishDate", dir: "desc" },
-    results: [], page: 1, maskOn: false, loading: false, qbit: false,
+    results: [], total: 0, capped: false, page: 1, maskOn: false, loading: false, qbit: false,
 };
 
 const $ = (s) => document.querySelector(s);
@@ -73,13 +73,19 @@ function el(tag, attrs = {}, ...children) {
 }
 
 /* ---------- contrôles (jours / catégories / indexeurs) ---------- */
+function setDays(v) {
+    state.days = v;
+    try { localStorage.setItem("days", String(v)); } catch (e) {}
+    renderDays();
+}
+
 function renderDays() {
     daysBox.replaceChildren(...DAYS.map((d) => {
         const b = el("button", { type: "button", text: d.l });
         if (d.v === state.days) b.classList.add("active");
         b.addEventListener("click", () => {
             if (state.days === d.v) return;
-            state.days = d.v; renderDays(); rerunOrSync();
+            setDays(d.v); rerunOrSync();
         });
         return b;
     }));
@@ -157,6 +163,7 @@ async function runSearch() {
         if (res.status === 401) { location.href = "login.php"; return; }
         if (data.error) { renderError(data.error); return; }
         state.results = data.results || [];
+        state.total = data.total || state.results.length;
         state.capped = !!data.capped;
         renderResults();
     } catch (e) {
@@ -211,10 +218,20 @@ function renderResults() {
     }
     const shown = all.slice(0, state.page * PAGE_SIZE);
 
-    const meta = el("div", { class: "meta-row" },
-        el("span", {}, el("b", { text: String(all.length) }),
-            ` résultat${all.length > 1 ? "s" : ""}`, state.capped ? " (max)" : ""),
-        el("span", { class: "muted", text: state.cats.size ? `${state.cats.size} catégorie(s)` : "Toutes catégories" }));
+    const left = el("span", {}, el("b", { text: String(all.length) }), ` affiché${all.length > 1 ? "s" : ""}`);
+    if (state.total > all.length) left.append(el("span", { class: "muted", text: ` sur ${state.total}` }));
+
+    const right = el("span", { class: "meta-actions" });
+    if (state.days !== 0) {
+        const btn = el("button", { type: "button", class: "link-btn", text: "↔ Élargir à tout" });
+        btn.addEventListener("click", () => { setDays(0); renderDays(); state.page = 1; runSearch(); });
+        right.append(btn);
+    } else if (state.capped) {
+        right.append(el("span", { class: "muted", text: "Affine ta recherche pour voir le reste" }));
+    } else {
+        right.append(el("span", { class: "muted", text: state.cats.size ? `${state.cats.size} catégorie(s)` : "Toutes catégories" }));
+    }
+    const meta = el("div", { class: "meta-row" }, left, right);
 
     const table = el("table", {},
         el("thead", {}, renderHeadRow()),
@@ -408,7 +425,7 @@ function renderHistory(h) {
 function syncUrl() {
     const p = new URLSearchParams();
     if (state.query) p.set("q", state.query);
-    if (state.days !== 1) p.set("days", state.days);
+    if (state.days !== 0) p.set("days", state.days);
     if (state.trackers.size) p.set("trackers", [...state.trackers].join(","));
     if (state.cats.size) p.set("cats", [...state.cats].join(","));
     const qs = p.toString();
@@ -425,6 +442,7 @@ function readUrl() {
 /* ---------- init ---------- */
 async function init() {
     try { state.maskOn = localStorage.getItem("maskTrackers") === "1"; } catch (e) {}
+    try { const sd = parseInt(localStorage.getItem("days"), 10); if (DAYS.some((x) => x.v === sd)) state.days = sd; } catch (e) {}
     applyMask();
     readUrl();
     renderDays();

@@ -46,15 +46,13 @@ final class ProwlarrClient
      *
      * @param array<int,int> $indexerIds  IDs d'indexeurs (vide = tous)
      * @param array<int,int> $categories  catégories newznab (vide = toutes)
-     * @param int            $limit       cap du nombre de résultats (0 = illimité)
-     * @return array<int,array<string,mixed>>
+     * @return array<int,array<string,mixed>>  triés par date décroissante
      */
     public function search(
         string $query,
         array $indexerIds = [],
         int $maxAgeDays = 0,
-        array $categories = [],
-        int $limit = 0
+        array $categories = []
     ): array {
         $query = trim($query);
         if ($query === '') {
@@ -86,15 +84,11 @@ final class ProwlarrClient
             }));
         }
 
-        // Tri par date décroissante pour que le cap conserve les plus récents.
+        // Tri par date décroissante (les plus récents d'abord).
         usort($results, static function ($a, $b): int {
             return (strtotime((string) ($b['publishDate'] ?? '')) ?: 0)
                 <=> (strtotime((string) ($a['publishDate'] ?? '')) ?: 0);
         });
-
-        if ($limit > 0 && count($results) > $limit) {
-            $results = array_slice($results, 0, $limit);
-        }
 
         return $results;
     }

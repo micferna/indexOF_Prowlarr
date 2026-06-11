@@ -251,6 +251,13 @@ body {
     animation: rise 0.4s ease both;
 }
 .meta-row b { color: var(--text); }
+.meta-actions { display: inline-flex; align-items: center; gap: 8px; }
+.link-btn {
+    background: none; border: none; cursor: pointer; padding: 0;
+    color: var(--accent); font-size: 13px; font-weight: 600;
+    transition: color 0.2s;
+}
+.link-btn:hover { color: var(--accent-2); text-decoration: underline; }
 
 .table-wrap {
     background: var(--panel);

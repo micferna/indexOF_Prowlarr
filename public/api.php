@@ -159,16 +159,19 @@ try {
         $categories = $parseIds((string) ($_GET['cats'] ?? ''));
 
         $limit = (int) $config['limit'];
-        $raw = $client->search($query, $trackers, $days, $categories, $limit);
+        $all   = $client->search($query, $trackers, $days, $categories);
+        $total = count($all);
+        $page  = array_slice($all, 0, $limit);
         $results = array_map(
             static fn (array $r): array => map_result($r, $config['secret']),
-            $raw
+            $page
         );
 
         json_out([
             'query'   => $query,
+            'total'   => $total,
             'count'   => count($results),
-            'capped'  => count($results) >= $limit,
+            'capped'  => $total > $limit,
             'results' => $results,
         ]);
     }
