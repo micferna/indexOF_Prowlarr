@@ -130,3 +130,5 @@ Incohérence notable : `getTrackers()` utilisait déjà l'en-tête `X-Api-Key` (
 - **Rate limiting** sur la recherche et le proxy de téléchargement.
 - **HTTPS obligatoire** + en-tête `Strict-Transport-Security` en production.
 - **Rotation** de la clé API Prowlarr (celle d'exemple a fuité dans le dépôt git — la régénérer).
+- **Hôte de confiance du proxy** : le backend Prowlarr (admin-configuré via `PROWLARR_BASE_URL`) est explicitement autorisé par le proxy de téléchargement, même sur IP privée — ses liens pointent vers lui-même (réseau interne/Docker). Tout autre hôte reste soumis au blocage des IP privées. Le couplage avec la signature HMAC borne la surface aux URLs réellement émises par l'application.
+- **Liens de download Prowlarr** : ils embarquent la clé API de Prowlarr (comportement natif de Prowlarr), donc visible côté client pour un utilisateur authentifié de l'outil. Acceptable derrière une auth/VPN ; sinon, envisager un magasin de jetons côté serveur.

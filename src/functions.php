@@ -41,18 +41,14 @@ function verify_url_signature(string $url, string $signature, string $secret): b
 }
 
 /**
- * Résout un hôte et renvoie une IP publique vérifiée, ou null si aucune.
+ * Résout un hôte en liste d'IP (ou l'IP elle-même si c'est déjà un littéral).
  *
- * L'IP renvoyée sert à épingler la connexion cURL (CURLOPT_RESOLVE) : on se
- * connecte exactement à l'IP qu'on a validée, ce qui déjoue le DNS rebinding
- * (la résolution ne peut pas changer entre la vérification et la connexion).
- * Bloque loopback, plages privées et réservées (anti-SSRF / métadonnées cloud).
+ * @return array<int,string>
  */
-function resolve_to_public_ip(string $host): ?string
+function dns_lookup_ips(string $host): array
 {
-    // Hôte déjà fourni sous forme d'IP littérale.
     if (filter_var($host, FILTER_VALIDATE_IP)) {
-        return ip_is_public($host) ? $host : null;
+        return [$host];
     }
 
     $ips = [];
@@ -74,13 +70,34 @@ function resolve_to_public_ip(string $host): ?string
             $ips = $ipv4;
         }
     }
+    return $ips;
+}
 
-    foreach ($ips as $ip) {
+/**
+ * Renvoie une IP publique vérifiée pour l'hôte, ou null si aucune.
+ *
+ * L'IP renvoyée sert à épingler la connexion cURL (CURLOPT_RESOLVE) : on se
+ * connecte exactement à l'IP qu'on a validée, ce qui déjoue le DNS rebinding
+ * (la résolution ne peut pas changer entre la vérification et la connexion).
+ * Bloque loopback, plages privées et réservées (anti-SSRF / métadonnées cloud).
+ */
+function resolve_to_public_ip(string $host): ?string
+{
+    foreach (dns_lookup_ips($host) as $ip) {
         if (ip_is_public($ip)) {
             return $ip;
         }
     }
     return null;
+}
+
+/**
+ * Renvoie la première IP résolue (toute plage confondue), pour un hôte de
+ * confiance explicitement autorisé (ex. le backend Prowlarr admin-configuré).
+ */
+function resolve_host_ip(string $host): ?string
+{
+    return dns_lookup_ips($host)[0] ?? null;
 }
 
 /** True si l'IP n'est ni privée ni réservée. */

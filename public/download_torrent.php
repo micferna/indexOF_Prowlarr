@@ -41,6 +41,11 @@ if (!verify_url_signature($url, $sig, $config['secret'])) {
     fail(403, "Signature invalide : URL non autorisée.");
 }
 
+// Le backend Prowlarr (admin-configuré) est de confiance : ses liens de
+// téléchargement pointent souvent vers lui-même, sur une IP privée (réseau
+// interne / Docker). On l'autorise explicitement, mais lui seul.
+$trustedHost = (string) parse_url($config['base_url'], PHP_URL_HOST);
+
 // Suivi manuel des redirections : chaque saut est re-validé (schéma + IP publique)
 // et la connexion est épinglée à l'IP vérifiée — pas de SSRF via redirect ni
 // via DNS rebinding (cURL ne re-résout jamais de lui-même).
@@ -61,7 +66,12 @@ for ($hop = 0; ; $hop++) {
     }
 
     $port = (int) ($parts['port'] ?? ($scheme === 'https' ? 443 : 80));
-    $ip   = resolve_to_public_ip($host);
+
+    $ip = resolve_to_public_ip($host);
+    if ($ip === null && $trustedHost !== '' && strcasecmp($host, $trustedHost) === 0) {
+        // Hôte Prowlarr de confiance : autorisé même sur une IP privée.
+        $ip = resolve_host_ip($host);
+    }
     if ($ip === null) {
         fail(403, "Cible interdite (adresse interne/réservée).");
     }

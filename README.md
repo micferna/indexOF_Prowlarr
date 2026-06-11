@@ -37,8 +37,12 @@ docker compose up -d --build
 
 ```
 public/                 # Racine web exposée (seul ce dossier est servi)
-  index.php             # Recherche + affichage des résultats
+  index.php             # Coquille HTML (aucune donnée sensible)
+  api.php               # API JSON : recherche + liste d'indexeurs (liens signés)
   download_torrent.php  # Proxy .torrent sécurisé (signature HMAC + anti-SSRF)
+  assets/
+    app.css             # Design (thème sombre, sans dépendance CDN)
+    app.js              # Front dynamique (AJAX, tri client, masquage indexeurs)
 src/                    # Hors racine web
   config.php            # Chargement de la configuration (env > .env)
   ProwlarrClient.php    # Client API Prowlarr (cURL, X-Api-Key, cache, timeouts)
@@ -48,6 +52,14 @@ Dockerfile              # Multi-stage : php-fpm (app) + nginx (web), base Alpine
 docker-compose.yml      # web (nginx) + php (php-fpm) + prowlarr
 AUDIT.md                # Audit de sécurité et correctifs
 ```
+
+## Fonctionnalités de l'interface
+
+- **Recherche dynamique** (AJAX) sans rechargement de page, état partageable par URL (`?q=…&days=…&trackers=…`).
+- **Tri instantané** côté client (titre, taille, seeders, âge).
+- **Filtres** par indexeur (chips) et par ancienneté (24 h → tout).
+- **Masquage des noms d'indexeurs** : un bouton bascule le floutage des noms (chips + colonne source), persisté localement ; le survol révèle ponctuellement.
+- Liens **magnet** directs ou téléchargement `.torrent` via le proxy signé.
 
 ## Configuration (`.env`)
 
