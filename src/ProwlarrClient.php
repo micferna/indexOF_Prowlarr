@@ -42,6 +42,38 @@ final class ProwlarrClient
     }
 
     /**
+     * Noms des indexeurs actuellement en échec (backoff actif).
+     *
+     * @return array<int,string>
+     */
+    public function failingIndexers(): array
+    {
+        $status = $this->request('/api/v1/indexerstatus');
+
+        $failingIds = [];
+        foreach ($status as $entry) {
+            if (!is_array($entry) || !isset($entry['indexerId'])) {
+                continue;
+            }
+            $till = isset($entry['disabledTill']) ? strtotime((string) $entry['disabledTill']) : false;
+            if ($till !== false && $till > time()) {
+                $failingIds[] = (int) $entry['indexerId'];
+            }
+        }
+        if ($failingIds === []) {
+            return [];
+        }
+
+        $names = [];
+        foreach ($this->indexers() as $indexer) {
+            if (in_array($indexer['id'], $failingIds, true)) {
+                $names[] = $indexer['name'];
+            }
+        }
+        return $names;
+    }
+
+    /**
      * Recherche de releases.
      *
      * @param array<int,int> $indexerIds  IDs d'indexeurs (vide = tous)

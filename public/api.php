@@ -124,17 +124,34 @@ try {
     if ($action === 'status') {
         $count = null;
         $connected = false;
+        $errors = [];
         try {
             $count = count($client->indexers());
             $connected = true;
+            $errors = $client->failingIndexers();
         } catch (Throwable $e) {
             $connected = false;
         }
+
+        $qbitOn = QbittorrentClient::isConfigured($config['qbit_url']);
+        $qbitCats = [];
+        if ($qbitOn) {
+            $qc = new QbittorrentClient(
+                $config['qbit_url'],
+                $config['qbit_user'],
+                $config['qbit_pass'],
+                $config['timeout'],
+            );
+            $qbitCats = $qc->categories();
+        }
+
         json_out([
-            'connected'   => $connected,
-            'indexers'    => $count,
-            'qbit'        => QbittorrentClient::isConfigured($config['qbit_url']),
-            'authEnabled' => auth_enabled($config),
+            'connected'      => $connected,
+            'indexers'       => $count,
+            'indexerErrors'  => $errors,
+            'qbit'           => $qbitOn,
+            'qbitCategories' => $qbitCats,
+            'authEnabled'    => auth_enabled($config),
         ]);
     }
 

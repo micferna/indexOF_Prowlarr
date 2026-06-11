@@ -38,10 +38,16 @@ function svgIcon(d) {
     return svg;
 }
 
+const QUALITY_ORDER = ["2160p", "1080p", "720p", "480p", "REMUX", "BluRay", "WEB", "HDTV",
+    "x265", "x264", "AV1", "HDR", "DV", "Atmos", "DTS", "FLAC", "MULTI", "FR", "VOSTFR"];
+const SORTABLE = ["title", "size", "seeders", "leechers", "publishDate"];
+
 const state = {
     query: "", days: 0, trackers: new Set(), cats: new Set(),
     sort: { field: "publishDate", dir: "desc" },
-    results: [], total: 0, capped: false, page: 1, maskOn: false, loading: false, qbit: false,
+    facets: { minSeeders: 0, freeleech: false, quality: new Set() },
+    results: [], total: 0, capped: false, page: 1, maskOn: false, loading: false,
+    qbit: false, qbitCategories: [], qbitCategory: "",
 };
 
 const $ = (s) => document.querySelector(s);
@@ -53,8 +59,11 @@ const catsBox = $("#categories");
 const chipsBox = $("#trackers");
 const maskBtn = $("#mask-toggle");
 const resultsBox = $("#results");
+const facetsBox = $("#facets");
 const statusBox = $("#status");
 const historyList = $("#history");
+const qbitCatWrap = $("#qbit-cat-wrap");
+const qbitCatSel = $("#qbit-cat");
 const CSRF = document.querySelector('meta[name="csrf"]')?.content || "";
 
 /* ---------- helpers DOM ---------- */
@@ -151,6 +160,7 @@ async function runSearch() {
     syncUrl();
     if (!state.query) { state.results = []; renderIdle(); return; }
     setLoading(true);
+    state.facets = { minSeeders: 0, freeleech: false, quality: new Set() };
     renderSkeleton();
 
     const p = new URLSearchParams({ action: "search", q: state.query, days: state.days });
@@ -165,6 +175,7 @@ async function runSearch() {
         state.results = data.results || [];
         state.total = data.total || state.results.length;
         state.capped = !!data.capped;
+        renderFacets();
         renderResults();
     } catch (e) {
         renderError("Impossible de contacter le serveur.");
@@ -175,51 +186,124 @@ async function runSearch() {
 
 function setLoading(on) { state.loading = on; submitBtn.disabled = on; }
 
-/* ---------- tri ---------- */
-function sortedResults() {
+/* ---------- facettes + tri ---------- */
+function facetFiltered() {
+    const f = state.facets;
+    return state.results.filter((x) => {
+        if (f.minSeeders > 0 && x.seeders < f.minSeeders) return false;
+        if (f.freeleech && !x.freeleech) return false;
+        if (f.quality.size && ![...f.quality].every((q) => (x.badges || []).includes(q))) return false;
+        return true;
+    });
+}
+function sortResults(arr) {
     const { field, dir } = state.sort;
     const mul = dir === "asc" ? 1 : -1;
-    return [...state.results].sort((a, b) => {
+    return [...arr].sort((a, b) => {
         if (field === "title") return a.title.localeCompare(b.title) * mul;
         let av = a[field], bv = b[field];
         if (field === "publishDate") { av = Date.parse(av) || 0; bv = Date.parse(bv) || 0; }
         return (((av > bv) - (av < bv))) * mul;
     });
 }
+function visibleResults() { return sortResults(facetFiltered()); }
+
 function toggleSort(field) {
     if (state.sort.field === field) state.sort.dir = state.sort.dir === "asc" ? "desc" : "asc";
     else state.sort = { field, dir: field === "title" ? "asc" : "desc" };
+    try { localStorage.setItem("sort", JSON.stringify(state.sort)); } catch (e) {}
     state.page = 1;
     renderResults();
 }
 
+function renderFacets() {
+    if (!state.results.length) { facetsBox.hidden = true; facetsBox.replaceChildren(); return; }
+    facetsBox.hidden = false;
+
+    const present = new Set();
+    state.results.forEach((r) => (r.badges || []).forEach((b) => present.add(b)));
+    const hasFree = state.results.some((r) => r.freeleech);
+    const maxSeed = Math.max(10, ...state.results.map((r) => r.seeders));
+
+    const parts = [el("span", { class: "facet-title", text: "Filtrer" })];
+
+    const slider = el("input", { type: "range", min: "0", max: String(maxSeed),
+        value: String(state.facets.minSeeders), class: "facet-range" });
+    const seedVal = el("span", { class: "facet-val", text: "≥ " + state.facets.minSeeders });
+    slider.addEventListener("input", () => {
+        state.facets.minSeeders = parseInt(slider.value, 10);
+        seedVal.textContent = "≥ " + slider.value;
+        state.page = 1; renderResults();
+    });
+    parts.push(el("label", { class: "facet" }, el("span", { class: "facet-lbl", text: "Seeders" }), slider, seedVal));
+
+    if (hasFree) {
+        const fl = el("button", { type: "button", text: "Freeleech",
+            class: "facet-chip" + (state.facets.freeleech ? " active" : "") });
+        fl.addEventListener("click", () => {
+            state.facets.freeleech = !state.facets.freeleech; fl.classList.toggle("active");
+            state.page = 1; renderResults();
+        });
+        parts.push(fl);
+    }
+
+    QUALITY_ORDER.filter((q) => present.has(q)).forEach((q) => {
+        const chip = el("button", { type: "button", text: q,
+            class: "facet-chip" + (state.facets.quality.has(q) ? " active" : "") });
+        chip.addEventListener("click", () => {
+            state.facets.quality.has(q) ? state.facets.quality.delete(q) : state.facets.quality.add(q);
+            chip.classList.toggle("active"); state.page = 1; renderResults();
+        });
+        parts.push(chip);
+    });
+
+    if (state.facets.minSeeders || state.facets.freeleech || state.facets.quality.size) {
+        const reset = el("button", { type: "button", class: "facet-reset", text: "✕ Réinitialiser" });
+        reset.addEventListener("click", () => {
+            state.facets = { minSeeders: 0, freeleech: false, quality: new Set() };
+            state.page = 1; renderFacets(); renderResults();
+        });
+        parts.push(reset);
+    }
+
+    facetsBox.replaceChildren(...parts);
+}
+
 /* ---------- rendu ---------- */
+function hideFacets() { facetsBox.hidden = true; facetsBox.replaceChildren(); }
 function renderIdle() {
+    hideFacets();
     resultsBox.replaceChildren(el("div", { class: "state" },
         el("span", { class: "emoji", text: "🛰️" }),
         "Lancez une recherche pour interroger vos indexeurs."));
 }
 function renderSkeleton() {
+    hideFacets();
     const rows = Array.from({ length: 6 }, () => el("div", { class: "sk-row" }));
     resultsBox.replaceChildren(el("div", { class: "table-wrap" },
         el("div", { class: "skeleton" }, el("div", { class: "spinner" }), ...rows)));
 }
 function renderError(msg) {
+    hideFacets();
     resultsBox.replaceChildren(el("div", { class: "state error" },
         el("span", { class: "emoji", text: "⚠️" }), msg));
 }
 
 function renderResults() {
-    const all = sortedResults();
+    const all = visibleResults();
     if (!all.length) {
+        const msg = state.results.length
+            ? "Aucun résultat avec ces filtres."
+            : `Aucun résultat pour « ${state.query} ».`;
         resultsBox.replaceChildren(el("div", { class: "state" },
-            el("span", { class: "emoji", text: "🔍" }), `Aucun résultat pour « ${state.query} ».`));
+            el("span", { class: "emoji", text: "🔍" }), msg));
         return;
     }
     const shown = all.slice(0, state.page * PAGE_SIZE);
 
-    const left = el("span", {}, el("b", { text: String(all.length) }), ` affiché${all.length > 1 ? "s" : ""}`);
-    if (state.total > all.length) left.append(el("span", { class: "muted", text: ` sur ${state.total}` }));
+    const left = el("span", {}, el("b", { text: String(all.length) }), ` résultat${all.length > 1 ? "s" : ""}`);
+    if (all.length < state.results.length) left.append(el("span", { class: "muted", text: ` (sur ${state.results.length})` }));
+    else if (state.total > state.results.length) left.append(el("span", { class: "muted", text: ` sur ${state.total}` }));
 
     const right = el("span", { class: "meta-actions" });
     if (state.days !== 0) {
@@ -358,6 +442,7 @@ async function sendToQbit(r, btn) {
     const body = new URLSearchParams();
     if (r.magnet) body.set("url", r.magnet);
     else { body.set("url", r.dl.url); body.set("sig", r.dl.sig); }
+    if (state.qbitCategory) body.set("category", state.qbitCategory);
     try {
         const res = await fetch("send.php", {
             method: "POST",
@@ -390,11 +475,22 @@ async function loadStatus() {
         if (res.status === 401) { location.href = "login.php"; return; }
         const s = await res.json();
         state.qbit = !!s.qbit;
+        state.qbitCategories = s.qbitCategories || [];
+        renderQbitCategories();
+
         const dot = statusBox.querySelector(".status-dot");
         const txt = statusBox.querySelector(".status-text");
+        const oldWarn = statusBox.querySelector(".status-warn");
+        if (oldWarn) oldWarn.remove();
+
         if (s.connected) {
             dot.className = "status-dot ok";
             txt.textContent = `${s.indexers} indexeur${s.indexers > 1 ? "s" : ""}` + (s.qbit ? " · qBit" : "");
+            const errs = s.indexerErrors || [];
+            if (errs.length) {
+                statusBox.append(el("span", { class: "status-warn",
+                    title: "Indexeurs en erreur : " + errs.join(", "), text: `⚠ ${errs.length}` }));
+            }
         } else {
             dot.className = "status-dot ko";
             txt.textContent = "Prowlarr hors ligne";
@@ -403,6 +499,24 @@ async function loadStatus() {
         statusBox.querySelector(".status-dot").className = "status-dot ko";
         statusBox.querySelector(".status-text").textContent = "Hors ligne";
     }
+}
+
+function renderQbitCategories() {
+    if (!qbitCatWrap || !qbitCatSel) return;
+    if (!state.qbit || !state.qbitCategories.length) { qbitCatWrap.hidden = true; return; }
+    qbitCatWrap.hidden = false;
+    qbitCatSel.replaceChildren(
+        el("option", { value: "", text: "Sans catégorie" }),
+        ...state.qbitCategories.map((c) => el("option", { value: c, text: c }))
+    );
+    if (state.qbitCategory) qbitCatSel.value = state.qbitCategory;
+}
+
+if (qbitCatSel) {
+    qbitCatSel.addEventListener("change", () => {
+        state.qbitCategory = qbitCatSel.value;
+        try { localStorage.setItem("qbitCat", state.qbitCategory); } catch (e) {}
+    });
 }
 
 /* ---------- historique ---------- */
@@ -443,6 +557,8 @@ function readUrl() {
 async function init() {
     try { state.maskOn = localStorage.getItem("maskTrackers") === "1"; } catch (e) {}
     try { const sd = parseInt(localStorage.getItem("days"), 10); if (DAYS.some((x) => x.v === sd)) state.days = sd; } catch (e) {}
+    try { const so = JSON.parse(localStorage.getItem("sort") || "null"); if (so && SORTABLE.includes(so.field) && (so.dir === "asc" || so.dir === "desc")) state.sort = so; } catch (e) {}
+    try { state.qbitCategory = localStorage.getItem("qbitCat") || ""; } catch (e) {}
     applyMask();
     readUrl();
     renderDays();

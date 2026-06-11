@@ -426,6 +426,45 @@ body.mask-on .maskable:hover { filter: blur(0); }
 }
 .logout:hover { color: var(--text); border-color: var(--border-bright); }
 
+.topbar-right { display: inline-flex; align-items: center; gap: 10px; }
+.qbit-cat {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px 6px 3px 12px;
+}
+.qbit-cat .qbit-ic { width: 14px; height: 14px; fill: none; stroke: var(--cyan); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.qbit-cat select {
+    background: none; border: none; color: var(--muted); font-size: 12px; font-weight: 600;
+    outline: none; cursor: pointer; padding: 4px 4px; border-radius: 999px;
+}
+.qbit-cat select option { background: #11131f; color: var(--text); }
+.status-warn { margin-left: 4px; color: var(--mid); font-size: 12px; font-weight: 700; cursor: help; }
+
+/* ---------- Barre de facettes ---------- */
+.facets {
+    max-width: 1080px; margin: 0 auto 14px; padding: 11px 14px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 9px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    animation: rise 0.35s ease both;
+}
+.facet-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-right: 2px; }
+.facet { display: inline-flex; align-items: center; gap: 8px; }
+.facet-lbl { font-size: 12px; color: var(--muted); }
+.facet-range { accent-color: var(--accent); cursor: pointer; width: 110px; }
+.facet-val { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text); min-width: 34px; }
+.facet-chip {
+    cursor: pointer; padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+    transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.facet-chip:hover { color: var(--text); border-color: var(--border-bright); }
+.facet-chip.active { color: #fff; border-color: transparent; background: var(--grad); }
+.facet-reset {
+    margin-left: auto; cursor: pointer; background: none; border: none;
+    color: var(--muted); font-size: 12px; font-weight: 600; transition: color 0.2s;
+}
+.facet-reset:hover { color: #ffb4b4; }
+
 /* Catégories : variante accentuée des chips */
 .chips-cat { margin-top: 14px; }
 .chips-cat .chip.active { background: linear-gradient(120deg, var(--cyan), var(--accent)); }

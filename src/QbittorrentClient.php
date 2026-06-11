@@ -71,6 +71,67 @@ final class QbittorrentClient
         }
     }
 
+    /**
+     * Liste des catégories qBittorrent (best-effort, [] si indisponible).
+     *
+     * @return array<int,string>
+     */
+    public function categories(): array
+    {
+        $ch = curl_init();
+        if ($ch === false) {
+            return [];
+        }
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => min(10, $this->timeout),
+            CURLOPT_TIMEOUT        => $this->timeout,
+            CURLOPT_PROTOCOLS      => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_COOKIEFILE     => '',
+            CURLOPT_REFERER        => $this->baseUrl,
+        ]);
+
+        try {
+            $body = $this->get($ch, '/api/v2/torrents/categories');
+            if ($body === null) { // auth requise
+                $this->login($ch);
+                $body = $this->get($ch, '/api/v2/torrents/categories');
+            }
+            $data = json_decode((string) $body, true);
+            if (!is_array($data)) {
+                return [];
+            }
+            return array_map('strval', array_keys($data));
+        } catch (Throwable $e) {
+            return [];
+        } finally {
+            curl_close($ch);
+        }
+    }
+
+    /**
+     * @param \CurlHandle $ch
+     * @return string|null  null si l'authentification est requise (401/403)
+     */
+    private function get($ch, string $path): ?string
+    {
+        curl_setopt($ch, CURLOPT_HTTPGET, true);
+        curl_setopt($ch, CURLOPT_URL, $this->baseUrl . $path);
+
+        $response = curl_exec($ch);
+        if ($response === false || curl_errno($ch) !== 0) {
+            throw new RuntimeException('qBittorrent injoignable : ' . curl_error($ch));
+        }
+        $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        if ($status === 401 || $status === 403) {
+            return null;
+        }
+        if ($status < 200 || $status >= 300) {
+            throw new RuntimeException("qBittorrent a répondu HTTP {$status}.");
+        }
+        return (string) $response;
+    }
+
     /** @param \CurlHandle $ch */
     private function login($ch): void
     {

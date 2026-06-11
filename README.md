@@ -65,7 +65,9 @@ AUDIT.md                # Audit de sécurité et correctifs
 - **Tri instantané** côté client (titre, taille, seeders, âge).
 - **Filtres** par indexeur (chips), par **catégorie** (Films, Séries, Musique, Logiciels, Livres, Jeux) et par ancienneté (24 h → tout).
 - **Résultats enrichis** : seeders/leechers, catégorie, badges de qualité (1080p, x265, WEB, FLAC…), indicateur **freeleech**.
-- **Actions par résultat** : télécharger le `.torrent` (proxy signé), ouvrir/copier le magnet, ou **envoyer directement à qBittorrent**.
+- **Filtres facettes** instantanés (sans recharger) : seeders minimum, freeleech, et qualité (chips dérivés des résultats).
+- **Actions par résultat** : télécharger le `.torrent` (proxy signé), ouvrir/copier le magnet, ou **envoyer directement à qBittorrent** (avec choix de la catégorie de destination).
+- **Tri mémorisé** et indicateur des **indexeurs en erreur**.
 - **Masquage des noms d'indexeurs** : un bouton bascule le floutage des noms (chips + colonne source), persisté localement ; le survol révèle ponctuellement.
 - **Historique de recherche** (local), pagination « charger plus », indicateur de **statut** Prowlarr/qBittorrent.
 

@@ -39,9 +39,15 @@ $showLogout = auth_enabled($config);
         <span id="status" class="status" title="État de la connexion">
             <span class="status-dot"></span><span class="status-text">…</span>
         </span>
-        <?php if ($showLogout): ?>
-            <a href="logout.php" class="logout">Déconnexion</a>
-        <?php endif; ?>
+        <div class="topbar-right">
+            <label id="qbit-cat-wrap" class="qbit-cat" hidden>
+                <svg viewBox="0 0 24 24" aria-hidden="true" class="qbit-ic"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                <select id="qbit-cat" aria-label="Catégorie qBittorrent"></select>
+            </label>
+            <?php if ($showLogout): ?>
+                <a href="logout.php" class="logout">Déconnexion</a>
+            <?php endif; ?>
+        </div>
     </div>
 
     <header class="hero">
@@ -72,6 +78,7 @@ $showLogout = auth_enabled($config);
         <div id="trackers" class="chips" aria-label="Filtrer par indexeur"></div>
     </header>
 
+    <section id="facets" class="facets" hidden aria-label="Filtres"></section>
     <main id="results" class="results" aria-live="polite"></main>
 
     <noscript><p style="text-align:center;color:#9aa">JavaScript est requis pour cette application.</p></noscript>
