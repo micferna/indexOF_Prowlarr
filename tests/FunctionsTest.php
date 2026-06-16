@@ -94,4 +94,34 @@ final class FunctionsTest extends TestCase
         $this->assertSame('&quot;&#039;', e('"\''));
         $this->assertSame('', e(null));
     }
+
+    public function testSealOpenRoundTrip(): void
+    {
+        $secret = str_repeat('a', 32);
+        $url = 'http://prowlarr:9696/1/download?apikey=SECRET123&link=abc';
+
+        $token = seal_url($url, $secret);
+        $this->assertNotSame('', $token);
+        // Le secret (apikey) ne doit jamais apparaître en clair dans le jeton.
+        $this->assertStringNotContainsString('SECRET123', $token);
+        $this->assertStringNotContainsString('apikey', $token);
+
+        $this->assertSame($url, open_url($token, $secret));
+        // Mauvais secret => null (échec d'authentification GCM).
+        $this->assertNull(open_url($token, 'autre-secret-de-32-caracteres!!'));
+        // Jeton altéré => null.
+        $this->assertNull(open_url($token . 'AA', $secret));
+        $this->assertNull(open_url('nimportequoi', $secret));
+        $this->assertNull(open_url('', $secret));
+    }
+
+    public function testIsAdultResult(): void
+    {
+        $this->assertTrue(is_adult_result(['categories' => [['id' => 6000, 'name' => 'XXX']]]));
+        $this->assertTrue(is_adult_result(['categories' => [['id' => 6010, 'name' => 'Movies/Adult']]]));
+        $this->assertTrue(is_adult_result(['categories' => [['id' => 100, 'name' => 'Porn']]]));
+        $this->assertFalse(is_adult_result(['categories' => [['id' => 2000, 'name' => 'Movies']]]));
+        $this->assertFalse(is_adult_result(['categories' => []]));
+        $this->assertFalse(is_adult_result([]));
+    }
 }

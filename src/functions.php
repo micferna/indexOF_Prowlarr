@@ -40,6 +40,139 @@ function verify_url_signature(string $url, string $signature, string $secret): b
     return hash_equals(sign_url($url, $secret), $signature);
 }
 
+/* ------------------------------------------------------------------ *
+ * Jetons opaques (chiffrement authentifié AES-256-GCM)
+ *
+ * Les liens de téléchargement Prowlarr embarquent la clé API (et parfois un
+ * passkey tracker). Pour ne JAMAIS exposer ces secrets au navigateur, on ne
+ * transmet plus l'URL : on transmet un jeton chiffré que seul le serveur peut
+ * ouvrir. Confidentialité + intégrité + anti-forge (remplace la signature HMAC
+ * réflective pour le flux de download/envoi).
+ * ------------------------------------------------------------------ */
+function b64url_encode(string $bytes): string
+{
+    return rtrim(strtr(base64_encode($bytes), '+/', '-_'), '=');
+}
+
+function b64url_decode(string $s): string
+{
+    return (string) base64_decode(strtr($s, '-_', '+/'), true);
+}
+
+/** Scelle une chaîne (URL/magnet) en jeton opaque lié au secret applicatif. */
+function seal_url(string $plain, string $secret): string
+{
+    $key = hash('sha256', 'indexof-seal|' . $secret, true);
+    $iv  = random_bytes(12);
+    $tag = '';
+    $ct  = openssl_encrypt($plain, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+    if ($ct === false) {
+        return '';
+    }
+    return b64url_encode($iv . $tag . $ct);
+}
+
+/** Ouvre un jeton scellé ; renvoie null si invalide/altéré (échec d'auth GCM). */
+function open_url(string $token, string $secret): ?string
+{
+    $raw = b64url_decode($token);
+    if (strlen($raw) < 28) { // 12 (iv) + 16 (tag) + >=1
+        return null;
+    }
+    $key = hash('sha256', 'indexof-seal|' . $secret, true);
+    $iv  = substr($raw, 0, 12);
+    $tag = substr($raw, 12, 16);
+    $ct  = substr($raw, 28);
+    $pt  = openssl_decrypt($ct, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+    return $pt === false ? null : $pt;
+}
+
+/**
+ * Détecte une release adulte (catégorie newznab XXX 6000-6999, ou nom de
+ * catégorie explicite). Sert au filtrage côté serveur (safe-mode).
+ *
+ * @param array<string,mixed> $r
+ */
+function is_adult_result(array $r): bool
+{
+    if (empty($r['categories']) || !is_array($r['categories'])) {
+        return false;
+    }
+    foreach ($r['categories'] as $c) {
+        $id = is_array($c) ? (int) ($c['id'] ?? 0) : 0;
+        if ($id >= 6000 && $id < 7000) {
+            return true;
+        }
+        $name = is_array($c) ? strtolower((string) ($c['name'] ?? '')) : '';
+        if ($name !== '' && (str_contains($name, 'xxx') || str_contains($name, 'adult') || str_contains($name, 'porn'))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* ------------------------------------------------------------------ *
+ * Limitation de débit (anti-brute-force) — compteur d'échecs par clé,
+ * persisté dans le répertoire de cache. Best-effort applicatif ; la limite
+ * faisant autorité est posée au niveau nginx (limit_req sur l'IP réelle).
+ * ------------------------------------------------------------------ */
+/** IP du client (REMOTE_ADDR ; X-Forwarded-For seulement si TRUST_PROXY=1). */
+function client_ip(): string
+{
+    $remote = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+    if (getenv('TRUST_PROXY') === '1') {
+        $xff = (string) ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? '');
+        if ($xff !== '') {
+            $first = trim(explode(',', $xff)[0]);
+            if (filter_var($first, FILTER_VALIDATE_IP)) {
+                return $first;
+            }
+        }
+    }
+    return $remote !== '' ? $remote : 'unknown';
+}
+
+function throttle_file(string $dir, string $key): string
+{
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0700, true);
+    }
+    return $dir . '/throttle_' . preg_replace('/[^a-z0-9_]/i', '', $key) . '.json';
+}
+
+/** @return array<int,int> */
+function throttle_read(string $file): array
+{
+    if (!is_file($file)) {
+        return [];
+    }
+    $d = json_decode((string) @file_get_contents($file), true);
+    return is_array($d) ? array_map('intval', $d) : [];
+}
+
+/** Nombre d'échecs récents dans la fenêtre. */
+function throttle_failures(string $dir, string $key, int $windowSec): int
+{
+    $cut = time() - $windowSec;
+    return count(array_filter(throttle_read(throttle_file($dir, $key)), static fn ($t) => $t >= $cut));
+}
+
+/** Enregistre un échec ; renvoie le total dans la fenêtre. */
+function throttle_record(string $dir, string $key, int $windowSec): int
+{
+    $file = throttle_file($dir, $key);
+    $cut  = time() - $windowSec;
+    $ts   = array_values(array_filter(throttle_read($file), static fn ($t) => $t >= $cut));
+    $ts[] = time();
+    @file_put_contents($file, json_encode($ts), LOCK_EX);
+    return count($ts);
+}
+
+function throttle_reset(string $dir, string $key): void
+{
+    @unlink(throttle_file($dir, $key));
+}
+
 /**
  * Résout un hôte en liste d'IP (ou l'IP elle-même si c'est déjà un littéral).
  *

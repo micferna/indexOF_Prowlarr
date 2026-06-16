@@ -62,15 +62,19 @@ function map_result(array $r, string $secret): array
         }
     }
 
-    // Couple signé pour le téléchargement (proxy navigateur ET envoi qBittorrent).
-    $dl = null;
-    if ($http !== '') {
-        $dl = ['url' => $http, 'sig' => sign_url($http, $secret)];
-    }
+    // Jeton opaque pour le téléchargement du .torrent (proxy navigateur).
+    // L'URL Prowlarr embarque la clé API : elle est CHIFFRÉE, jamais exposée au
+    // client. Seul le serveur peut l'ouvrir.
+    $dl = $http !== '' ? ['token' => seal_url($http, $secret)] : null;
+
+    // Jeton d'envoi qBittorrent : cible préférée (magnet si dispo, sinon .torrent
+    // signé). Empêche l'injection d'un torrent arbitraire non issu de l'app.
+    $sendTarget = $magnet !== '' ? $magnet : $http;
+    $send = $sendTarget !== '' ? seal_url($sendTarget, $secret) : null;
 
     $title = (string) ($r['title'] ?? 'N/A');
 
-    // Catégorie la plus parlante (première de la liste).
+    // Catégorie la plus parlante (première de la liste) + détection adulte (XXX).
     $category = '';
     if (!empty($r['categories']) && is_array($r['categories'])) {
         $first = $r['categories'][0] ?? null;
@@ -78,6 +82,7 @@ function map_result(array $r, string $secret): array
             $category = (string) ($first['name'] ?? '');
         }
     }
+    $adult = is_adult_result($r);
 
     // Freeleech via les flags d'indexeur.
     $freeleech = false;
@@ -103,10 +108,12 @@ function map_result(array $r, string $secret): array
         'publishDate' => (string) ($r['publishDate'] ?? ''),
         'daysOld'     => days_since($r['publishDate'] ?? null),
         'category'    => $category,
+        'adult'       => $adult,
         'badges'      => quality_badges($title),
         'freeleech'   => $freeleech,
         'magnet'      => $magnet !== '' ? $magnet : null,
         'dl'          => $dl,
+        'send'        => $send,
     ];
 }
 
@@ -160,8 +167,10 @@ try {
     }
 
     if ($action === 'search') {
+        // Mode découverte (Top) : requête vide autorisée, tri par seeders côté client.
+        $top   = (string) ($_GET['top'] ?? '') === '1';
         $query = trim((string) ($_GET['q'] ?? ''));
-        if ($query === '') {
+        if ($query === '' && !$top) {
             json_out(['query' => '', 'count' => 0, 'capped' => false, 'results' => []]);
         }
 
@@ -175,8 +184,18 @@ try {
         $trackers   = $parseIds((string) ($_GET['trackers'] ?? ''));
         $categories = $parseIds((string) ($_GET['cats'] ?? ''));
 
+        // Safe-mode (-18) APPLIQUÉ CÔTÉ SERVEUR : par défaut le contenu XXX n'est
+        // pas renvoyé. Il n'apparaît que si explicitement demandé (safe=0) ou si
+        // une catégorie adulte (6000-6999) est sélectionnée. Filtrage AVANT la
+        // limite de pagination (sinon le quota fausse les compteurs).
+        $safe = ((string) ($_GET['safe'] ?? '1')) !== '0';
+        $wantAdult = (bool) array_filter($categories, static fn (int $c): bool => $c >= 6000 && $c < 7000);
+
         $limit = (int) $config['limit'];
-        $all   = $client->search($query, $trackers, $days, $categories);
+        $all   = $client->search($query, $trackers, $days, $categories, $top);
+        if ($safe && !$wantAdult) {
+            $all = array_values(array_filter($all, static fn (array $r): bool => !is_adult_result($r)));
+        }
         $total = count($all);
         $page  = array_slice($all, 0, $limit);
         $results = array_map(
@@ -195,5 +214,8 @@ try {
 
     json_out(['error' => 'Action inconnue.'], 400);
 } catch (Throwable $exception) {
-    json_out(['error' => $exception->getMessage()], 502);
+    // Détail loggé côté serveur uniquement (les messages cURL peuvent contenir
+    // des hôtes/IP internes — pas de fuite au client).
+    error_log('[indexof] api error: ' . $exception->getMessage());
+    json_out(['error' => 'Service momentanément indisponible.'], 502);
 }

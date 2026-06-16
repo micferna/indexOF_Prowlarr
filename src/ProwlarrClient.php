@@ -78,16 +78,19 @@ final class ProwlarrClient
      *
      * @param array<int,int> $indexerIds  IDs d'indexeurs (vide = tous)
      * @param array<int,int> $categories  catégories newznab (vide = toutes)
+     * @param bool $browse  mode découverte : autorise la requête vide (les
+     *                      indexeurs renvoient leurs dernières releases).
      * @return array<int,array<string,mixed>>  triés par date décroissante
      */
     public function search(
         string $query,
         array $indexerIds = [],
         int $maxAgeDays = 0,
-        array $categories = []
+        array $categories = [],
+        bool $browse = false
     ): array {
         $query = trim($query);
-        if ($query === '') {
+        if ($query === '' && !$browse) {
             return [];
         }
 
@@ -102,8 +105,13 @@ final class ProwlarrClient
         foreach ($cats as $cat) {
             $queryString .= '&categories=' . $cat;
         }
+        // En mode découverte la requête est vide : on borne la charge par indexeur.
+        if ($browse) {
+            $queryString .= '&limit=100';
+        }
 
-        $key = 'search_' . md5($query . '|' . implode(',', $ids) . '|' . implode(',', $cats));
+        $prefix = $browse ? 'browse|' : '';
+        $key = 'search_' . md5($prefix . $query . '|' . implode(',', $ids) . '|' . implode(',', $cats));
         $results = $this->cached($key, function () use ($queryString): array {
             return $this->request('/api/v1/search?' . $queryString);
         });
@@ -116,7 +124,8 @@ final class ProwlarrClient
             }));
         }
 
-        // Tri par date décroissante (les plus récents d'abord).
+        // Tri par date décroissante (les plus récents d'abord) — y compris en
+        // mode découverte : on veut les derniers uploads, pas les plus seedés.
         usort($results, static function ($a, $b): int {
             return (strtotime((string) ($b['publishDate'] ?? '')) ?: 0)
                 <=> (strtotime((string) ($a['publishDate'] ?? '')) ?: 0);

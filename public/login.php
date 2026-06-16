@@ -24,16 +24,31 @@ if (!auth_enabled($config) || is_authenticated($config)) {
     exit;
 }
 
+// Anti-brute-force : compteur d'échecs par IP (et global), sur 15 min. La limite
+// faisant autorité est posée par nginx (limit_req sur l'IP réelle) ; ceci est le
+// garde-fou applicatif.
+$cacheDir = $config['cache_dir'];
+$ipKey = 'login_' . client_ip();
+$blocked = throttle_failures($cacheDir, $ipKey, 900) >= 10
+        || throttle_failures($cacheDir, 'login_global', 900) >= 100;
+
 $error = null;
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
-    if (!verify_csrf($_POST['csrf'] ?? null)) {
+    if ($blocked) {
+        $error = 'Trop de tentatives. Réessayez dans quelques minutes.';
+    } elseif (!verify_csrf($_POST['csrf'] ?? null)) {
         $error = 'Session expirée, réessayez.';
     } elseif (check_password($config, (string) ($_POST['password'] ?? ''))) {
+        throttle_reset($cacheDir, $ipKey);
         session_regenerate_id(true);
+        unset($_SESSION['csrf']); // nouveau jeton CSRF après élévation de privilège
         $_SESSION['auth'] = true;
         header('Location: index.php');
         exit;
     } else {
+        throttle_record($cacheDir, $ipKey, 900);
+        throttle_record($cacheDir, 'login_global', 900);
+        usleep(400000); // ralentit le brute-force en ligne
         $error = 'Mot de passe incorrect.';
     }
 }

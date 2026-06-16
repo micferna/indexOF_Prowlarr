@@ -54,36 +54,46 @@ body {
     to   { transform: translate3d(3%, 2%, 0) scale(1.08); }
 }
 
-/* ---------- Hero ---------- */
-.hero {
-    max-width: 920px;
-    margin: 0 auto clamp(24px, 5vw, 48px);
-    text-align: center;
-    animation: rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+/* ---------- App bar (sticky, tout-en-un) ---------- */
+.appbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: calc(-1 * clamp(16px, 4vw, 40px)) -16px clamp(18px, 3vw, 26px);
+    padding: 11px 16px;
+    background: rgba(7, 8, 15, 0.72);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(16px) saturate(1.2);
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
 }
-
-.brand {
+.brand-mini {
     display: inline-flex;
     align-items: center;
-    gap: 12px;
-    margin-top: clamp(12px, 5vh, 56px);
+    gap: 9px;
+    text-decoration: none;
+    flex: none;
 }
-.brand-mark {
+.brand-mini .brand-mark {
     display: grid;
     place-items: center;
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
     background: var(--grad);
     color: #fff;
-    font-size: 26px;
+    font-size: 19px;
     font-weight: 700;
-    box-shadow: 0 10px 30px -8px rgba(124, 131, 255, 0.7);
+    box-shadow: 0 8px 22px -8px rgba(124, 131, 255, 0.7);
 }
-.brand h1 {
-    font-size: clamp(30px, 6vw, 44px);
+.brand-name {
+    font-size: 19px;
     font-weight: 800;
     letter-spacing: -0.03em;
+    color: var(--text);
 }
 .grad {
     background: var(--grad);
@@ -91,10 +101,11 @@ body {
     background-clip: text;
     color: transparent;
 }
-.tagline {
-    color: var(--muted);
-    margin-top: 8px;
-    font-size: clamp(14px, 2.2vw, 16px);
+.appbar-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
 }
 
 /* ---------- Barre de commande ---------- */
@@ -117,6 +128,16 @@ body {
     border-color: var(--accent);
     box-shadow: var(--shadow), 0 0 0 4px rgba(124, 131, 255, 0.18);
 }
+/* Variante compacte dans la barre sticky */
+.appbar .command-bar {
+    margin: 0;
+    flex: 1 1 280px;
+    max-width: 540px;
+    padding: 4px 4px 4px 14px;
+    box-shadow: none;
+}
+.appbar #q { font-size: 15px; padding: 8px 4px; }
+.appbar .btn-primary { padding: 8px 16px; font-size: 14px; box-shadow: none; }
 .cb-icon {
     width: 20px;
     height: 20px;
@@ -156,15 +177,107 @@ body {
 .btn-primary:active { transform: translateY(0); }
 .btn-primary[disabled] { opacity: 0.6; cursor: progress; }
 
-/* ---------- Contrôles (jours + masque) ---------- */
-.controls {
-    display: flex;
-    flex-wrap: wrap;
+/* Bouton Top (barre sticky) */
+.btn-top {
+    flex: none;
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    gap: 12px;
-    margin-top: 18px;
+    gap: 6px;
+    cursor: pointer;
+    padding: 9px 15px;
+    border-radius: 999px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-weight: 600;
+    font-size: 14px;
+    transition: border-color 0.2s, transform 0.15s, background 0.2s;
 }
+.btn-top:hover { border-color: rgba(251, 146, 60, 0.5); background: rgba(251, 146, 60, 0.08); transform: translateY(-1px); }
+.btn-top:active { transform: translateY(0); }
+.btn-top-fire { font-size: 15px; line-height: 1; }
+
+/* Toggle -18 / safe-mode (topbar) */
+.safe-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 30px; height: 30px;
+    cursor: pointer;
+    border-radius: 999px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    font-size: 14px;
+    filter: grayscale(1) opacity(0.55);
+    transition: filter 0.2s, border-color 0.2s, background 0.2s;
+}
+.safe-btn:hover { border-color: var(--border-bright); filter: grayscale(0.4) opacity(0.85); }
+.safe-btn.revealed {
+    filter: none;
+    border-color: rgba(251, 146, 60, 0.5);
+    background: rgba(251, 146, 60, 0.1);
+}
+
+/* Bannière Top */
+.top-banner {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    max-width: 1080px;
+    margin: 0 auto 12px;
+    padding: 10px 16px;
+    background: linear-gradient(120deg, rgba(251, 146, 60, 0.12), rgba(192, 104, 255, 0.08));
+    border: 1px solid rgba(251, 146, 60, 0.25);
+    border-radius: 14px;
+    font-size: 15px;
+    animation: rise 0.35s ease both;
+}
+.top-banner .tb-fire { font-size: 16px; }
+
+/* ---------- Bouton + panneau Filtres ---------- */
+.filters-wrap { position: relative; flex: none; }
+.filters-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    cursor: pointer;
+    padding: 9px 14px;
+    border-radius: 999px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 600;
+    transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.filters-btn:hover { color: var(--text); border-color: var(--border-bright); }
+.filters-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.filters-btn.has-sel { color: var(--text); border-color: rgba(124, 131, 255, 0.45); background: rgba(124, 131, 255, 0.1); }
+.filters-count { color: var(--accent); font-variant-numeric: tabular-nums; }
+.filters-btn .tk-caret { font-size: 11px; transition: transform 0.2s; }
+.filters-btn[aria-expanded="true"] .tk-caret { transform: rotate(180deg); }
+
+.filters-panel {
+    position: absolute;
+    top: calc(100% + 9px);
+    right: 0;
+    z-index: 30;
+    width: min(540px, 92vw);
+    max-height: 72vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+    background: #0d0f1a;
+    border: 1px solid var(--border-bright);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    animation: rise 0.18s ease both;
+}
+.fp-section { display: flex; flex-direction: column; gap: 9px; }
+.fp-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--faint); }
+.fp-section .chips, .fp-section .segmented { margin-top: 0; justify-content: flex-start; }
+.fp-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 4px; border-top: 1px solid var(--border); }
 .segmented {
     display: inline-flex;
     padding: 4px;
@@ -397,16 +510,7 @@ body.mask-on .maskable:hover { filter: blur(0); }
     *, ::before, ::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
 
-/* ---------- Topbar / statut / logout ---------- */
-.topbar {
-    position: fixed;
-    top: 0; left: 0; right: 0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 18px;
-    z-index: 5;
-}
+/* ---------- Statut / qBit / logout (dans la barre sticky) ---------- */
 .status {
     display: inline-flex;
     align-items: center;
@@ -429,7 +533,6 @@ body.mask-on .maskable:hover { filter: blur(0); }
 }
 .logout:hover { color: var(--text); border-color: var(--border-bright); }
 
-.topbar-right { display: inline-flex; align-items: center; gap: 10px; }
 .qbit-cat {
     display: inline-flex; align-items: center; gap: 5px; height: 30px;
     background: var(--panel); border: 1px solid var(--border);

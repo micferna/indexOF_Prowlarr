@@ -23,7 +23,7 @@ function load_config(): array
     $env = [];
     foreach ([__DIR__ . '/../.env', __DIR__ . '/../../.env'] as $envFile) {
         if (is_readable($envFile)) {
-            $parsed = parse_ini_file($envFile, false, INI_SCANNER_RAW);
+            $parsed = @parse_ini_file($envFile, false, INI_SCANNER_RAW);
             if (is_array($parsed)) {
                 $env = $parsed;
             }
@@ -47,10 +47,22 @@ function load_config(): array
         exit('Configuration manquante : définissez PROWLARR_API_KEY et PROWLARR_BASE_URL.');
     }
 
+    // APP_SECRET : obligatoire et fort. Pas de repli déterministe — il serait
+    // dérivable de la clé API (exposée au backend) et permettrait de forger des
+    // jetons de téléchargement.
     $secret = $get('APP_SECRET');
-    if ($secret === null || $secret === '') {
-        // Repli déterministe pour le développement ; à définir explicitement en prod.
-        $secret = hash('sha256', $apiKey . '|' . $baseUrl);
+    if ($secret === null || $secret === '' || strlen($secret) < 16 || str_starts_with($secret, 'changeme')) {
+        http_response_code(500);
+        exit("Configuration manquante : définissez un APP_SECRET fort (openssl rand -hex 32).");
+    }
+
+    // Fail-closed : refuse de démarrer sans mot de passe, sauf désactivation
+    // explicite et consciente de l'authentification.
+    $password = (string) $get('APP_PASSWORD', '');
+    $authDisabled = $get('AUTH_DISABLED', '0') === '1';
+    if ($password === '' && !$authDisabled) {
+        http_response_code(500);
+        exit("Configuration manquante : définissez APP_PASSWORD (ou AUTH_DISABLED=1 pour désactiver explicitement l'authentification).");
     }
 
     $config = [
@@ -60,8 +72,8 @@ function load_config(): array
         'timeout'    => max(1, (int) $get('PROWLARR_TIMEOUT', '15')),
         'cache_ttl'  => max(0, (int) $get('CACHE_TTL', '120')),
         'cache_dir'  => $get('CACHE_DIR', sys_get_temp_dir() . '/indexof_cache'),
-        // Authentification (mot de passe unique). Vide = pas d'auth.
-        'password'   => (string) $get('APP_PASSWORD', ''),
+        // Authentification (mot de passe unique). Vide => exige AUTH_DISABLED=1.
+        'password'   => $password,
         // Limite de résultats par page (pagination "charger plus").
         'limit'      => max(10, (int) $get('RESULT_LIMIT', '200')),
         // Client qBittorrent (Web API v2). URL vide = fonctionnalité désactivée.

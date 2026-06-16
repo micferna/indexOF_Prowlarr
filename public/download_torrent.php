@@ -34,14 +34,15 @@ function fail(int $code, string $message): never
     exit;
 }
 
-$url = (string) ($_GET['url'] ?? '');
-$sig = (string) ($_GET['sig'] ?? '');
-
-if ($url === '' || $sig === '') {
-    fail(400, "Requête invalide : URL ou signature manquante.");
+// Jeton opaque chiffré (l'URL réelle — clé API Prowlarr incluse — n'est jamais
+// exposée au navigateur). Seul le serveur peut l'ouvrir.
+$token = (string) ($_GET['token'] ?? '');
+if ($token === '') {
+    fail(400, "Requête invalide : jeton manquant.");
 }
-if (!verify_url_signature($url, $sig, $config['secret'])) {
-    fail(403, "Signature invalide : URL non autorisée.");
+$url = open_url($token, $config['secret']);
+if ($url === null) {
+    fail(403, "Jeton invalide ou altéré.");
 }
 
 // Le backend Prowlarr (admin-configuré) est de confiance : ses liens de

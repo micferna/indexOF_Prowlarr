@@ -38,23 +38,35 @@ if (!QbittorrentClient::isConfigured($config['qbit_url'])) {
     send_out(['error' => 'qBittorrent n\'est pas configuré.'], 400);
 }
 
-$url = (string) ($_POST['url'] ?? '');
-$sig = (string) ($_POST['sig'] ?? '');
+// Jeton opaque chiffré scellant la cible (magnet ou .torrent HTTP) réellement
+// proposée par l'app : empêche l'injection d'un torrent arbitraire ET cache la
+// clé API Prowlarr embarquée dans les liens HTTP.
+$token = (string) ($_POST['token'] ?? '');
 $category = trim((string) ($_POST['category'] ?? '')) ?: null;
 
-if ($url === '') {
-    send_out(['error' => 'URL manquante.'], 400);
+if ($token === '') {
+    send_out(['error' => 'Requête invalide.'], 400);
+}
+$target = open_url($token, $config['secret']);
+if ($target === null) {
+    send_out(['error' => 'Jeton invalide.'], 403);
 }
 
-// Un magnet est un identifiant public (pas de proxy) : accepté tel quel.
-// Une URL HTTP doit être signée par l'application (anti-injection d'URL arbitraire).
-if (str_starts_with($url, 'magnet:')) {
-    $target = $url;
-} elseif (safe_url($url) !== '#') {
-    if (!verify_url_signature($url, $sig, $config['secret'])) {
-        send_out(['error' => 'Signature invalide.'], 403);
+if (str_starts_with($target, 'magnet:')) {
+    // Magnet (identifiant public) issu d'un jeton de l'app : accepté.
+} elseif (safe_url($target) !== '#') {
+    // .torrent HTTP : c'est qBittorrent qui ira le récupérer. On valide que la
+    // cible n'est pas une IP interne/réservée (anti-SSRF via qBittorrent), sauf
+    // l'hôte Prowlarr de confiance (admin-configuré, souvent en IP privée).
+    $host = (string) parse_url($target, PHP_URL_HOST);
+    $trustedHost = (string) parse_url($config['base_url'], PHP_URL_HOST);
+    $allowed = $host !== '' && resolve_to_public_ip($host) !== null;
+    if (!$allowed && $trustedHost !== '' && strcasecmp($host, $trustedHost) === 0) {
+        $allowed = true;
     }
-    $target = $url;
+    if (!$allowed) {
+        send_out(['error' => 'Cible interdite (adresse interne/réservée).'], 403);
+    }
 } else {
     send_out(['error' => 'URL non autorisée.'], 400);
 }
@@ -70,5 +82,6 @@ try {
     $qbit->add($target, $category);
     send_out(['ok' => true]);
 } catch (Throwable $e) {
-    send_out(['error' => $e->getMessage()], 502);
+    error_log('[indexof] qbit error: ' . $e->getMessage());
+    send_out(['error' => "Échec de l'envoi à qBittorrent."], 502);
 }

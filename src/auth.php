@@ -18,6 +18,14 @@ function start_session(): void
     $https = (($_SERVER['HTTPS'] ?? '') !== '' && $_SERVER['HTTPS'] !== 'off')
         || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
 
+    // Anti-fixation : rejette tout ID de session non initialisé par le serveur ;
+    // cookie strictement serveur, Secure quand on est en HTTPS.
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.use_only_cookies', '1');
+    if ($https) {
+        ini_set('session.cookie_secure', '1');
+    }
+
     session_set_cookie_params([
         'lifetime' => 0,
         'path'     => '/',
@@ -27,6 +35,14 @@ function start_session(): void
     ]);
     session_name('indexof_sid');
     session_start();
+
+    // Expiration par inactivité (8 h) : une session oubliée ne vit pas indéfiniment.
+    $now = time();
+    if (isset($_SESSION['last']) && ($now - (int) $_SESSION['last']) > 8 * 3600) {
+        $_SESSION = [];
+        session_regenerate_id(true);
+    }
+    $_SESSION['last'] = $now;
 }
 
 /** @param array<string,mixed> $config */

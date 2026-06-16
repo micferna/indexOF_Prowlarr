@@ -10,7 +10,9 @@ const DAYS = [
 const CATS = [
     { id: 2000, l: "Films" }, { id: 5000, l: "Séries" }, { id: 3000, l: "Musique" },
     { id: 4000, l: "Logiciels" }, { id: 7000, l: "Livres" }, { id: 1000, l: "Jeux" },
+    { id: 6000, l: "🔞 -18" },
 ];
+const ADULT_CAT = 6000;
 
 const COLUMNS = [
     { key: "indexer", label: "Indexeur" },
@@ -44,6 +46,7 @@ const SORTABLE = ["title", "size", "seeders", "leechers", "publishDate"];
 
 const state = {
     query: "", days: 0, trackers: new Set(), cats: new Set(),
+    mode: "search", safeMode: true,
     sort: { field: "publishDate", dir: "desc" },
     facets: { minSeeders: 0, freeleech: false, quality: new Set() },
     results: [], total: 0, capped: false, page: 1, maskOn: false, loading: false,
@@ -58,6 +61,12 @@ const daysBox = $("#days");
 const catsBox = $("#categories");
 const chipsBox = $("#trackers");
 const maskBtn = $("#mask-toggle");
+const topBtn = $("#top-btn");
+const safeBtn = $("#safe-toggle");
+const filtersBtn = $("#filters-btn");
+const filtersPanel = $("#filters-panel");
+const filtersCount = $("#filters-count");
+const filtersReset = $("#filters-reset");
 const resultsBox = $("#results");
 const facetsBox = $("#facets");
 const statusBox = $("#status");
@@ -86,6 +95,7 @@ function setDays(v) {
     state.days = v;
     try { localStorage.setItem("days", String(v)); } catch (e) {}
     renderDays();
+    updateFiltersCount();
 }
 
 function renderDays() {
@@ -107,13 +117,17 @@ function renderCats() {
         chip.addEventListener("click", () => {
             chip.classList.toggle("active");
             state.cats.has(c.id) ? state.cats.delete(c.id) : state.cats.add(c.id);
+            updateFiltersCount();
             rerunOrSync();
         });
         return chip;
     }));
+    updateFiltersCount();
 }
 
+let lastIndexers = [];
 function renderChips(indexers) {
+    lastIndexers = indexers;
     if (!indexers.length) {
         chipsBox.replaceChildren(el("span", { class: "muted", text: "Aucun indexeur configuré dans Prowlarr." }));
         return;
@@ -125,15 +139,54 @@ function renderChips(indexers) {
         chip.addEventListener("click", () => {
             chip.classList.toggle("active");
             state.trackers.has(ix.id) ? state.trackers.delete(ix.id) : state.trackers.add(ix.id);
+            updateFiltersCount();
             rerunOrSync();
         });
         return chip;
     }));
+    updateFiltersCount();
+}
+
+/* ---------- panneau Filtres ---------- */
+function updateFiltersCount() {
+    if (!filtersCount) return;
+    const n = state.cats.size + state.trackers.size + (state.days !== 0 ? 1 : 0);
+    filtersCount.textContent = n ? ` · ${n}` : "";
+    filtersBtn.classList.toggle("has-sel", n > 0);
+}
+
+function setFiltersOpen(open) {
+    filtersPanel.toggleAttribute("hidden", !open);
+    filtersBtn.setAttribute("aria-expanded", String(open));
+}
+if (filtersBtn) {
+    filtersBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setFiltersOpen(filtersPanel.hasAttribute("hidden"));
+    });
+    document.addEventListener("click", (e) => {
+        if (!filtersPanel.hasAttribute("hidden") && !e.target.closest(".filters-wrap")) setFiltersOpen(false);
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && !filtersPanel.hasAttribute("hidden")) setFiltersOpen(false);
+    });
+}
+if (filtersReset) {
+    filtersReset.addEventListener("click", () => {
+        state.cats.clear();
+        state.trackers.clear();
+        state.days = 0;
+        try { localStorage.setItem("days", "0"); } catch (e) {}
+        renderDays();
+        renderCats();
+        renderChips(lastIndexers);
+        rerunOrSync();
+    });
 }
 
 function rerunOrSync() {
     state.page = 1;
-    if (state.query) runSearch(); else syncUrl();
+    if (state.query || state.mode === "top") runSearch(); else syncUrl();
 }
 
 /* ---------- masquage ---------- */
@@ -147,23 +200,59 @@ maskBtn.addEventListener("click", () => {
     applyMask();
 });
 
+/* ---------- safe-mode (-18) ---------- */
+function applySafe() {
+    if (!safeBtn) return;
+    safeBtn.setAttribute("aria-pressed", String(state.safeMode));
+    safeBtn.classList.toggle("revealed", !state.safeMode);
+    safeBtn.title = state.safeMode
+        ? "Contenu -18 masqué — cliquer pour l'afficher"
+        : "Contenu -18 affiché — cliquer pour le masquer";
+}
+if (safeBtn) {
+    safeBtn.addEventListener("click", () => {
+        state.safeMode = !state.safeMode;
+        try { localStorage.setItem("safeMode", state.safeMode ? "1" : "0"); } catch (e) {}
+        applySafe();
+        // Le filtrage est serveur : on relance la requête pour (dé)masquer le -18.
+        state.page = 1;
+        rerunOrSync();
+    });
+}
+
 /* ---------- recherche ---------- */
 form.addEventListener("submit", (e) => {
     e.preventDefault();
+    state.mode = "search";
     state.query = input.value.trim();
     state.page = 1;
     pushHistory(state.query);
     runSearch();
 });
 
+/* ---------- Top (découverte sans recherche) ---------- */
+if (topBtn) {
+    topBtn.addEventListener("click", () => {
+        state.mode = "top";
+        state.query = "";
+        input.value = "";
+        state.sort = { field: "publishDate", dir: "desc" };
+        state.page = 1;
+        runSearch();
+    });
+}
+
 async function runSearch() {
     syncUrl();
-    if (!state.query) { state.results = []; renderIdle(); return; }
+    const top = state.mode === "top";
+    if (!top && !state.query) { state.results = []; renderIdle(); return; }
     setLoading(true);
     state.facets = { minSeeders: 0, freeleech: false, quality: new Set() };
     renderSkeleton();
 
-    const p = new URLSearchParams({ action: "search", q: state.query, days: state.days });
+    const p = new URLSearchParams({ action: "search", days: state.days });
+    if (top) p.set("top", "1"); else p.set("q", state.query);
+    if (!state.safeMode) p.set("safe", "0");
     if (state.trackers.size) p.set("trackers", [...state.trackers].join(","));
     if (state.cats.size) p.set("cats", [...state.cats].join(","));
 
@@ -189,6 +278,8 @@ function setLoading(on) { state.loading = on; submitBtn.disabled = on; }
 /* ---------- facettes + tri ---------- */
 function facetFiltered() {
     const f = state.facets;
+    // Le -18 (safe-mode) est filtré CÔTÉ SERVEUR (api.php) — pas de filtrage
+    // cosmétique ici : le contenu adulte n'arrive même pas si safe-mode est actif.
     return state.results.filter((x) => {
         if (f.minSeeders > 0 && x.seeders < f.minSeeders) return false;
         if (f.freeleech && !x.freeleech) return false;
@@ -289,14 +380,25 @@ function renderError(msg) {
         el("span", { class: "emoji", text: "⚠️" }), msg));
 }
 
+function topBanner() {
+    const lbl = (DAYS.find((d) => d.v === state.days) || {}).l || "Tout";
+    return el("div", { class: "top-banner" },
+        el("span", { class: "tb-fire", text: "🆕" }),
+        el("b", { text: "Derniers uploads" }),
+        el("span", { class: "muted", text: state.days === 0 ? " · tous trackers" : ` · ${lbl}` }));
+}
+
 function renderResults() {
+    const top = state.mode === "top";
     const all = visibleResults();
     if (!all.length) {
         const msg = state.results.length
             ? "Aucun résultat avec ces filtres."
-            : `Aucun résultat pour « ${state.query} ».`;
-        resultsBox.replaceChildren(el("div", { class: "state" },
-            el("span", { class: "emoji", text: "🔍" }), msg));
+            : (top ? "Aucun torrent pour cette période. Essaie « Tout » ou d'autres catégories."
+                   : `Aucun résultat pour « ${state.query} ».`);
+        resultsBox.replaceChildren(
+            ...(top ? [topBanner()] : []),
+            el("div", { class: "state" }, el("span", { class: "emoji", text: top ? "🔥" : "🔍" }), msg));
         return;
     }
     const shown = all.slice(0, state.page * PAGE_SIZE);
@@ -321,7 +423,8 @@ function renderResults() {
         el("thead", {}, renderHeadRow()),
         el("tbody", {}, ...shown.map((r, i) => renderRow(r, i))));
 
-    const parts = [meta, el("div", { class: "table-wrap" }, table)];
+    const parts = top ? [topBanner(), meta, el("div", { class: "table-wrap" }, table)]
+                       : [meta, el("div", { class: "table-wrap" }, table)];
     if (shown.length < all.length) {
         const more = el("button", { type: "button", class: "load-more",
             text: `Charger plus (${all.length - shown.length} restants)` });
@@ -398,7 +501,7 @@ function rightCell(cls, txt) {
 }
 
 function torrentHref(dl) {
-    return "download_torrent.php?" + new URLSearchParams({ url: dl.url, sig: dl.sig }).toString();
+    return "download_torrent.php?" + new URLSearchParams({ token: dl.token }).toString();
 }
 
 function renderActions(r) {
@@ -416,7 +519,7 @@ function renderActions(r) {
         wrap.append(makeBtn("act act-copy", ICONS.copy, "Copier le magnet", () => copyText(r.magnet)));
         any = true;
     }
-    if (state.qbit && (r.dl || r.magnet)) {
+    if (state.qbit && r.send) {
         wrap.append(makeBtn("act act-qbit", ICONS.send, "Envoyer à qBittorrent", (btn) => sendToQbit(r, btn)));
         any = true;
     }
@@ -440,8 +543,7 @@ async function sendToQbit(r, btn) {
     btn.disabled = true;
     btn.classList.add("busy");
     const body = new URLSearchParams();
-    if (r.magnet) body.set("url", r.magnet);
-    else { body.set("url", r.dl.url); body.set("sig", r.dl.sig); }
+    body.set("token", r.send);
     if (state.qbitCategory) body.set("category", state.qbitCategory);
     try {
         const res = await fetch("send.php", {
@@ -538,7 +640,8 @@ function renderHistory(h) {
 /* ---------- URL partageable ---------- */
 function syncUrl() {
     const p = new URLSearchParams();
-    if (state.query) p.set("q", state.query);
+    if (state.mode === "top") p.set("top", "1");
+    else if (state.query) p.set("q", state.query);
     if (state.days !== 0) p.set("days", state.days);
     if (state.trackers.size) p.set("trackers", [...state.trackers].join(","));
     if (state.cats.size) p.set("cats", [...state.cats].join(","));
@@ -547,6 +650,7 @@ function syncUrl() {
 }
 function readUrl() {
     const p = new URLSearchParams(location.search);
+    if (p.get("top") === "1") state.mode = "top";
     if (p.has("q")) { state.query = p.get("q").trim(); input.value = state.query; }
     if (p.has("days")) { const d = parseInt(p.get("days"), 10); if (DAYS.some((x) => x.v === d)) state.days = d; }
     if (p.has("trackers")) p.get("trackers").split(",").map(Number).filter(Boolean).forEach((id) => state.trackers.add(id));
@@ -556,11 +660,14 @@ function readUrl() {
 /* ---------- init ---------- */
 async function init() {
     try { state.maskOn = localStorage.getItem("maskTrackers") === "1"; } catch (e) {}
+    try { state.safeMode = localStorage.getItem("safeMode") !== "0"; } catch (e) {}
     try { const sd = parseInt(localStorage.getItem("days"), 10); if (DAYS.some((x) => x.v === sd)) state.days = sd; } catch (e) {}
     try { const so = JSON.parse(localStorage.getItem("sort") || "null"); if (so && SORTABLE.includes(so.field) && (so.dir === "asc" || so.dir === "desc")) state.sort = so; } catch (e) {}
     try { state.qbitCategory = localStorage.getItem("qbitCat") || ""; } catch (e) {}
     applyMask();
+    applySafe();
     readUrl();
+    if (state.mode === "top") state.sort = { field: "publishDate", dir: "desc" };
     renderDays();
     renderCats();
     renderHistory();
@@ -573,6 +680,6 @@ async function init() {
         renderChips(data.indexers || []);
     } catch (e) { renderChips([]); }
 
-    if (state.query) runSearch();
+    if (state.mode === "top" || state.query) runSearch();
 }
 init();

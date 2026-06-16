@@ -10,10 +10,19 @@ services:
       - .env
     environment:
       CACHE_DIR: /tmp/indexof_cache
+      # Mettre à 1 UNIQUEMENT si nginx est derrière un reverse-proxy de confiance
+      # qui pose X-Forwarded-For (sinon l'en-tête est usurpable).
+      TRUST_PROXY: "0"
     depends_on:
       - prowlarr
     networks:
       - indexof
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
 
   web:
     build:
@@ -22,12 +31,27 @@ services:
     image: indexof-prowlarr-web:latest
     container_name: indexof_web
     restart: unless-stopped
+    # N'écoute QUE sur la loopback : un reverse-proxy TLS (sur cet hôte) expose le
+    # service en HTTPS. Si votre reverse-proxy est sur une autre machine, adaptez.
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     depends_on:
       - php
     networks:
       - indexof
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - SETUID
+      - SETGID
+      - CHOWN
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
 
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
@@ -39,10 +63,13 @@ services:
       TZ: Europe/Paris
     volumes:
       - ./data/prowlarr:/config
+    # Panel admin : loopback uniquement (plus d'exposition réseau publique).
     ports:
-      - "9696:9696"
+      - "127.0.0.1:9696:9696"
     networks:
       - indexof
+    security_opt:
+      - no-new-privileges:true
 
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
@@ -55,10 +82,15 @@ services:
       WEBUI_PORT: "8080"
     volumes:
       - ./data/qbittorrent:/config
+    # WebUI : loopback uniquement. Dans qBittorrent (Settings > Web UI) : définir
+    # un mot de passe fort, activer CSRF + Host-header validation, désactiver le
+    # bypass d'authentification par sous-réseau local.
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     networks:
       - indexof
+    security_opt:
+      - no-new-privileges:true
 
 networks:
   indexof:
