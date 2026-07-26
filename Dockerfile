@@ -3,7 +3,7 @@
 ##########################################
 # Étape 1 — Application PHP (php-fpm)
 ##########################################
-FROM php:8.3-fpm-alpine AS php
+FROM php:8.5-fpm-alpine AS php
 
 # Applique les correctifs de sécurité des paquets OS (CVE).
 RUN apk upgrade --no-cache
