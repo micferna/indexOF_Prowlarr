@@ -21,15 +21,21 @@ concurrency:
 
 jobs:
   quality:
-    name: Lint · PHPStan · Tests
+    name: Lint · PHPStan · Tests (PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Version embarquée dans l'image, et la suivante : une montée de version
+        # ne doit pas se découvrir en production.
+        php: ['8.3', '8.5']
     steps:
       - uses: actions/checkout@v7
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          php-version: ${{ matrix.php }}
           extensions: curl, json, openssl
           tools: composer
           coverage: none

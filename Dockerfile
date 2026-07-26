@@ -28,6 +28,12 @@ WORKDIR /var/www/html
 COPY src/ ./src/
 COPY public/ ./public/
 
+# COPY conserve les permissions de l'hôte : un umask restrictif (fichiers en
+# 0660) produisait une image dont php-fpm, qui tourne en www-data, ne pouvait
+# pas lire le code. On fige des droits lisibles, indépendants de la machine
+# de build (lecture seule : rien n'est inscriptible).
+RUN chmod -R a=rX,u+w /var/www/html/src /var/www/html/public
+
 RUN mkdir -p /tmp/indexof_cache && chown -R www-data:www-data /tmp/indexof_cache
 
 # Tourne sans privilège root (le pool fpm n'a pas besoin de setuid).
@@ -44,6 +50,10 @@ RUN apk upgrade --no-cache
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 # nginx sert les fichiers statiques et vérifie leur existence (try_files).
 COPY public/ /var/www/html/public/
+
+# Mêmes droits déterministes que côté php : les workers nginx tournent en
+# utilisateur non privilégié et doivent pouvoir lire les assets.
+RUN chmod -R a=rX,u+w /var/www/html/public
 
 # Cible un asset statique (200 sans redirection vers le login) : healthcheck fiable.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
