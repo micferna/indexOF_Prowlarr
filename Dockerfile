@@ -42,7 +42,7 @@ USER www-data
 ##########################################
 # Étape 2 — Serveur web (nginx)
 ##########################################
-FROM nginx:1.27-alpine AS web
+FROM nginx:1.31-alpine AS web
 
 # Applique les correctifs de sécurité des paquets OS (CVE).
 RUN apk upgrade --no-cache
