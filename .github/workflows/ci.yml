@@ -24,7 +24,7 @@ jobs:
     name: Lint · PHPStan · Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -62,7 +62,7 @@ jobs:
       contents: read
       security-events: write # remontée SARIF dans l'onglet Security
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Prepare env
         run: cp exemple.env .env
@@ -71,7 +71,7 @@ jobs:
         run: docker compose build
 
       - name: Trivy — CVE image php (bloquant)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: indexof-prowlarr-php:latest
           scanners: vuln
@@ -80,7 +80,7 @@ jobs:
           ignore-unfixed: true
 
       - name: Trivy — CVE image web (bloquant)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: indexof-prowlarr-web:latest
           scanners: vuln
@@ -90,7 +90,7 @@ jobs:
 
       # Secrets commités et mauvaises configurations (Dockerfile, compose, CI).
       - name: Trivy — secrets et configuration (bloquant)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -101,7 +101,7 @@ jobs:
 
       # Vue complète (toutes sévérités) publiée dans l'onglet Security, sans bloquer.
       - name: Trivy — rapport SARIF
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -112,7 +112,7 @@ jobs:
           skip-dirs: data,vendor
 
       - name: Publier le rapport dans Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy.sarif
           category: trivy
@@ -124,15 +124,15 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Initialiser CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: javascript
           queries: security-and-quality
 
       - name: Analyser
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: codeql-javascript
