@@ -12,7 +12,6 @@ const CATS = [
     { id: 4000, l: "Logiciels" }, { id: 7000, l: "Livres" }, { id: 1000, l: "Jeux" },
     { id: 6000, l: "🔞 -18" },
 ];
-const ADULT_CAT = 6000;
 
 const COLUMNS = [
     { key: "indexer", label: "Indexeur" },
@@ -242,6 +241,11 @@ if (topBtn) {
     });
 }
 
+// Une recherche lente ne doit jamais écraser le résultat d'une recherche plus
+// récente : on annule la requête en vol et on ignore les réponses obsolètes.
+let searchSeq = 0;
+let searchAbort = null;
+
 async function runSearch() {
     syncUrl();
     const top = state.mode === "top";
@@ -256,9 +260,14 @@ async function runSearch() {
     if (state.trackers.size) p.set("trackers", [...state.trackers].join(","));
     if (state.cats.size) p.set("cats", [...state.cats].join(","));
 
+    const seq = ++searchSeq;
+    if (searchAbort) searchAbort.abort();
+    searchAbort = new AbortController();
+
     try {
-        const res = await fetch("api.php?" + p.toString());
+        const res = await fetch("api.php?" + p.toString(), { signal: searchAbort.signal });
         const data = await res.json();
+        if (seq !== searchSeq) return; // réponse dépassée
         if (res.status === 401) { location.href = "login.php"; return; }
         if (data.error) { renderError(data.error); return; }
         state.results = data.results || [];
@@ -267,9 +276,10 @@ async function runSearch() {
         renderFacets();
         renderResults();
     } catch (e) {
+        if (e.name === "AbortError" || seq !== searchSeq) return;
         renderError("Impossible de contacter le serveur.");
     } finally {
-        setLoading(false);
+        if (seq === searchSeq) setLoading(false);
     }
 }
 
@@ -442,9 +452,15 @@ function renderHeadRow() {
         if (col.sortable) {
             th.classList.add("sortable");
             th.append(el("span", { class: "arrow", text: "▲" }));
-            if (state.sort.field === col.key)
-                th.classList.add("sort-active", state.sort.dir === "desc" ? "sort-desc" : "sort-asc");
+            const active = state.sort.field === col.key;
+            if (active) th.classList.add("sort-active", state.sort.dir === "desc" ? "sort-desc" : "sort-asc");
+            // Tri accessible au clavier (Entrée / Espace) et annoncé aux lecteurs d'écran.
+            th.tabIndex = 0;
+            th.setAttribute("aria-sort", active ? (state.sort.dir === "asc" ? "ascending" : "descending") : "none");
             th.addEventListener("click", () => toggleSort(col.key));
+            th.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSort(col.key); }
+            });
         }
         tr.append(th);
     }

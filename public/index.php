@@ -2,21 +2,14 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../src/config.php';
-require __DIR__ . '/../src/functions.php';
-require __DIR__ . '/../src/auth.php';
+require_once __DIR__ . '/../src/config.php';
+require_once __DIR__ . '/../src/functions.php';
+require_once __DIR__ . '/../src/auth.php';
 
 $config = load_config();
 require_auth($config, 'html');
 
-header(
-    "Content-Security-Policy: default-src 'self'; img-src 'self' data:; "
-    . "style-src 'self'; script-src 'self'; connect-src 'self'; "
-    . "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
-);
-header('X-Content-Type-Options: nosniff');
-header('Referrer-Policy: no-referrer');
-header('X-Frame-Options: DENY');
+html_security_headers();
 
 $csrf = csrf_token();
 $showLogout = auth_enabled($config);
@@ -94,7 +87,7 @@ $showLogout = auth_enabled($config);
                 <select id="qbit-cat" aria-label="Catégorie qBittorrent"></select>
             </label>
             <?php if ($showLogout): ?>
-                <a href="logout.php" class="logout">Déconnexion</a>
+                <a href="logout.php?csrf=<?php echo e($csrf); ?>" class="logout">Déconnexion</a>
             <?php endif; ?>
         </div>
     </header>
@@ -102,7 +95,7 @@ $showLogout = auth_enabled($config);
     <section id="facets" class="facets" hidden aria-label="Filtres"></section>
     <main id="results" class="results" aria-live="polite"></main>
 
-    <noscript><p style="text-align:center;color:#9aa">JavaScript est requis pour cette application.</p></noscript>
+    <noscript><p class="noscript">JavaScript est requis pour cette application.</p></noscript>
 
     <script src="assets/app.js" defer></script>
 </body>

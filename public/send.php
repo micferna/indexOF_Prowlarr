@@ -7,35 +7,27 @@ declare(strict_types=1);
  * POST uniquement. Protégé par auth + CSRF ; les URLs HTTP doivent être signées.
  */
 
-require __DIR__ . '/../src/config.php';
-require __DIR__ . '/../src/functions.php';
-require __DIR__ . '/../src/auth.php';
-require __DIR__ . '/../src/QbittorrentClient.php';
+require_once __DIR__ . '/../src/config.php';
+require_once __DIR__ . '/../src/functions.php';
+require_once __DIR__ . '/../src/auth.php';
+require_once __DIR__ . '/../src/QbittorrentClient.php';
 
 $config = load_config();
 
 header('Content-Type: application/json; charset=utf-8');
-header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
+security_headers();
 
 require_auth($config, 'json');
 
-/** @param array<string,mixed> $data */
-function send_out(array $data, int $code = 200): never
-{
-    http_response_code($code);
-    echo json_encode($data, JSON_UNESCAPED_SLASHES);
-    exit;
-}
-
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
-    send_out(['error' => 'Méthode non autorisée.'], 405);
+    json_response(['error' => 'Méthode non autorisée.'], 405);
 }
 if (!verify_csrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($_POST['csrf'] ?? null))) {
-    send_out(['error' => 'Jeton CSRF invalide.'], 403);
+    json_response(['error' => 'Jeton CSRF invalide.'], 403);
 }
 if (!QbittorrentClient::isConfigured($config['qbit_url'])) {
-    send_out(['error' => 'qBittorrent n\'est pas configuré.'], 400);
+    json_response(['error' => 'qBittorrent n\'est pas configuré.'], 400);
 }
 
 // Jeton opaque chiffré scellant la cible (magnet ou .torrent HTTP) réellement
@@ -45,11 +37,11 @@ $token = (string) ($_POST['token'] ?? '');
 $category = trim((string) ($_POST['category'] ?? '')) ?: null;
 
 if ($token === '') {
-    send_out(['error' => 'Requête invalide.'], 400);
+    json_response(['error' => 'Requête invalide.'], 400);
 }
 $target = open_url($token, $config['secret']);
 if ($target === null) {
-    send_out(['error' => 'Jeton invalide.'], 403);
+    json_response(['error' => 'Lien invalide ou expiré — relancez la recherche.'], 403);
 }
 
 if (str_starts_with($target, 'magnet:')) {
@@ -65,10 +57,10 @@ if (str_starts_with($target, 'magnet:')) {
         $allowed = true;
     }
     if (!$allowed) {
-        send_out(['error' => 'Cible interdite (adresse interne/réservée).'], 403);
+        json_response(['error' => 'Cible interdite (adresse interne/réservée).'], 403);
     }
 } else {
-    send_out(['error' => 'URL non autorisée.'], 400);
+    json_response(['error' => 'URL non autorisée.'], 400);
 }
 
 $qbit = new QbittorrentClient(
@@ -80,8 +72,8 @@ $qbit = new QbittorrentClient(
 
 try {
     $qbit->add($target, $category);
-    send_out(['ok' => true]);
+    json_response(['ok' => true]);
 } catch (Throwable $e) {
     error_log('[indexof] qbit error: ' . $e->getMessage());
-    send_out(['error' => "Échec de l'envoi à qBittorrent."], 502);
+    json_response(['error' => "Échec de l'envoi à qBittorrent."], 502);
 }

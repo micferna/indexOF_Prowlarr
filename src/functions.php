@@ -7,6 +7,41 @@ declare(strict_types=1);
  * signature HMAC du proxy de téléchargement, et formatage d'affichage.
  */
 
+/**
+ * Politique de sécurité du contenu : tout vient de l'origine (aucun CDN, aucun
+ * inline), pas d'encadrement en iframe, pas de <base> injectable.
+ */
+const APP_CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'; "
+    . "script-src 'self'; connect-src 'self'; form-action 'self'; "
+    . "base-uri 'none'; frame-ancestors 'none'";
+
+/** En-têtes de sécurité communs à toutes les réponses. */
+function security_headers(): void
+{
+    header('X-Content-Type-Options: nosniff');
+    header('Referrer-Policy: no-referrer');
+}
+
+/** En-têtes des réponses HTML (CSP + anti-framing en plus). */
+function html_security_headers(): void
+{
+    security_headers();
+    header('Content-Security-Policy: ' . APP_CSP);
+    header('X-Frame-Options: DENY');
+}
+
+/**
+ * Réponse JSON terminale (les endpoints d'API n'ont rien à ajouter après).
+ *
+ * @param array<string,mixed> $data
+ */
+function json_response(array $data, int $code = 200): never
+{
+    http_response_code($code);
+    echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 /** Échappement HTML systématique (ENT_QUOTES couvre " et '). */
 function e(?string $value): string
 {
@@ -28,18 +63,6 @@ function safe_url(?string $url, array $allowedSchemes = ['http', 'https']): stri
     return in_array($scheme, $allowedSchemes, true) ? $url : '#';
 }
 
-/** Signe une URL pour le proxy de téléchargement. */
-function sign_url(string $url, string $secret): string
-{
-    return hash_hmac('sha256', $url, $secret);
-}
-
-/** Vérifie la signature d'une URL (comparaison à temps constant). */
-function verify_url_signature(string $url, string $signature, string $secret): bool
-{
-    return hash_equals(sign_url($url, $secret), $signature);
-}
-
 /* ------------------------------------------------------------------ *
  * Jetons opaques (chiffrement authentifié AES-256-GCM)
  *
@@ -59,20 +82,33 @@ function b64url_decode(string $s): string
     return (string) base64_decode(strtr($s, '-_', '+/'), true);
 }
 
-/** Scelle une chaîne (URL/magnet) en jeton opaque lié au secret applicatif. */
-function seal_url(string $plain, string $secret): string
+/** Durée de vie par défaut d'un jeton scellé (24 h). */
+const SEAL_TTL = 86400;
+
+/**
+ * Scelle une chaîne (URL/magnet) en jeton opaque lié au secret applicatif.
+ *
+ * Le jeton porte une date d'expiration : un lien qui fuite (historique, presse-
+ * papiers, logs d'un proxy) ne reste pas exploitable indéfiniment. $ttl = 0
+ * désactive l'expiration.
+ */
+function seal_url(string $plain, string $secret, int $ttl = SEAL_TTL): string
 {
+    $payload = ($ttl !== 0 ? (string) (time() + $ttl) : '0') . '|' . $plain;
     $key = hash('sha256', 'indexof-seal|' . $secret, true);
     $iv  = random_bytes(12);
     $tag = '';
-    $ct  = openssl_encrypt($plain, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+    $ct  = openssl_encrypt($payload, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
     if ($ct === false) {
         return '';
     }
     return b64url_encode($iv . $tag . $ct);
 }
 
-/** Ouvre un jeton scellé ; renvoie null si invalide/altéré (échec d'auth GCM). */
+/**
+ * Ouvre un jeton scellé ; renvoie null si invalide, altéré (échec d'auth GCM)
+ * ou expiré.
+ */
 function open_url(string $token, string $secret): ?string
 {
     $raw = b64url_decode($token);
@@ -84,7 +120,19 @@ function open_url(string $token, string $secret): ?string
     $tag = substr($raw, 12, 16);
     $ct  = substr($raw, 28);
     $pt  = openssl_decrypt($ct, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
-    return $pt === false ? null : $pt;
+    if ($pt === false) {
+        return null;
+    }
+
+    $sep = strpos($pt, '|');
+    if ($sep === false) {
+        return null;
+    }
+    $expiry = (int) substr($pt, 0, $sep);
+    if ($expiry !== 0 && $expiry < time()) {
+        return null;
+    }
+    return substr($pt, $sep + 1);
 }
 
 /**
@@ -137,7 +185,29 @@ function throttle_file(string $dir, string $key): string
     if (!is_dir($dir)) {
         @mkdir($dir, 0700, true);
     }
-    return $dir . '/throttle_' . preg_replace('/[^a-z0-9_]/i', '', $key) . '.json';
+    // Hachage (et non filtrage de caractères) : « 192.168.0.11 » et
+    // « 192.168.01.1 » — ou deux IPv6 — se réduisaient au même nom de fichier,
+    // donc au même compteur (blocage croisé entre clients / contournement).
+    return $dir . '/throttle_' . hash('sha256', $key) . '.json';
+}
+
+/**
+ * Purge best-effort des fichiers de travail expirés (cache Prowlarr, compteurs
+ * de throttle). Ces répertoires vivent en tmpfs (RAM) : sans purge ils
+ * grossissent indéfiniment. Déclenché de façon probabiliste (1 requête sur
+ * $chanceOverN) pour ne pas pénaliser chaque requête.
+ */
+function prune_dir(string $dir, int $maxAgeSec, string $glob = '*.json', int $chanceOverN = 50): void
+{
+    if ($maxAgeSec <= 0 || !is_dir($dir) || random_int(1, max(1, $chanceOverN)) !== 1) {
+        return;
+    }
+    $cut = time() - $maxAgeSec;
+    foreach (glob($dir . '/' . $glob) ?: [] as $file) {
+        if ((int) @filemtime($file) < $cut) {
+            @unlink($file);
+        }
+    }
 }
 
 /** @return array<int,int> */

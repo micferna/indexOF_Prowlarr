@@ -33,19 +33,10 @@ final class QbittorrentClient
      */
     public function add(string $url, ?string $category = null): void
     {
-        $ch = curl_init();
+        $ch = $this->newHandle();
         if ($ch === false) {
             throw new RuntimeException("Impossible d'initialiser la connexion à qBittorrent.");
         }
-
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_CONNECTTIMEOUT => min(10, $this->timeout),
-            CURLOPT_TIMEOUT        => $this->timeout,
-            CURLOPT_PROTOCOLS      => CURLPROTO_HTTP | CURLPROTO_HTTPS,
-            CURLOPT_COOKIEFILE     => '', // active le moteur de cookies en mémoire
-            CURLOPT_REFERER        => $this->baseUrl,
-        ]);
 
         $fields = ['urls' => $url];
         if ($category !== null && $category !== '') {
@@ -78,18 +69,10 @@ final class QbittorrentClient
      */
     public function categories(): array
     {
-        $ch = curl_init();
+        $ch = $this->newHandle();
         if ($ch === false) {
             return [];
         }
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_CONNECTTIMEOUT => min(10, $this->timeout),
-            CURLOPT_TIMEOUT        => $this->timeout,
-            CURLOPT_PROTOCOLS      => CURLPROTO_HTTP | CURLPROTO_HTTPS,
-            CURLOPT_COOKIEFILE     => '',
-            CURLOPT_REFERER        => $this->baseUrl,
-        ]);
 
         try {
             $body = $this->get($ch, '/api/v2/torrents/categories');
@@ -110,7 +93,36 @@ final class QbittorrentClient
     }
 
     /**
+     * Handle cURL partagé : timeouts stricts, schémas http(s) seulement, cookies
+     * en mémoire (conserve le SID entre le login et l'appel suivant) et Referer
+     * attendu par la protection CSRF de qBittorrent.
+     *
+     * @return \CurlHandle|false
+     */
+    private function newHandle()
+    {
+        if ($this->baseUrl === '') {
+            throw new RuntimeException("qBittorrent n'est pas configuré.");
+        }
+        $ch = curl_init();
+        if ($ch === false) {
+            return false;
+        }
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => min(10, $this->timeout),
+            CURLOPT_TIMEOUT        => $this->timeout,
+            CURLOPT_PROTOCOLS      => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_REFERER        => $this->baseUrl,
+        ]);
+        // Chaîne vide = moteur de cookies en mémoire (idiome documenté de cURL).
+        curl_setopt($ch, CURLOPT_COOKIEFILE, '');
+        return $ch;
+    }
+
+    /**
      * @param \CurlHandle $ch
+     * @param non-empty-string $path
      * @return string|null  null si l'authentification est requise (401/403)
      */
     private function get($ch, string $path): ?string
@@ -139,13 +151,17 @@ final class QbittorrentClient
             'username' => $this->username,
             'password' => $this->password,
         ]);
-        if ($status < 200 || $status >= 300 || stripos($body, 'Ok.') === false) {
+        // qBittorrent v4 : 200 + « Ok. » (ou « Fails. » si refus).
+        // qBittorrent v5 : 204 sans corps en cas de succès, 401/403 sinon.
+        // Exiger « Ok. » rejetait donc à tort toute connexion à un qBittorrent 5.x.
+        if ($status < 200 || $status >= 300 || stripos($body, 'Fails') !== false) {
             throw new RuntimeException('Authentification qBittorrent refusée.');
         }
     }
 
     /**
      * @param \CurlHandle $ch
+     * @param non-empty-string $path
      * @param array<string,string> $fields
      * @return array{0:int,1:string} [code HTTP, corps]
      */

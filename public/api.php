@@ -9,37 +9,26 @@ declare(strict_types=1);
  *   GET api.php?action=indexers
  *   GET api.php?action=search&q=...&days=1&trackers=1,2&cats=2000,5000
  *
- * Les liens de téléchargement sont signés (HMAC) côté serveur : le secret ne
- * quitte jamais le backend.
+ * Les liens de téléchargement sont scellés (chiffrés) côté serveur : les URLs
+ * Prowlarr — qui contiennent la clé API — ne quittent jamais le backend.
  */
 
-require __DIR__ . '/../src/config.php';
-require __DIR__ . '/../src/functions.php';
-require __DIR__ . '/../src/auth.php';
-require __DIR__ . '/../src/ProwlarrClient.php';
-require __DIR__ . '/../src/QbittorrentClient.php';
+require_once __DIR__ . '/../src/config.php';
+require_once __DIR__ . '/../src/functions.php';
+require_once __DIR__ . '/../src/auth.php';
+require_once __DIR__ . '/../src/ProwlarrClient.php';
+require_once __DIR__ . '/../src/QbittorrentClient.php';
 
 $config = load_config();
 
 header('Content-Type: application/json; charset=utf-8');
-header('X-Content-Type-Options: nosniff');
-header('Referrer-Policy: no-referrer');
 header('Cache-Control: no-store');
+security_headers();
 
 require_auth($config, 'json');
 
 /**
- * @param array<string,mixed> $data
- */
-function json_out(array $data, int $code = 200): never
-{
-    http_response_code($code);
-    echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
-/**
- * Transforme une release Prowlarr brute en objet d'affichage (avec lien signé).
+ * Transforme une release Prowlarr brute en objet d'affichage (liens scellés).
  *
  * @param array<string,mixed> $r
  * @return array<string,mixed>
@@ -152,7 +141,7 @@ try {
             $qbitCats = $qc->categories();
         }
 
-        json_out([
+        json_response([
             'connected'      => $connected,
             'indexers'       => $count,
             'indexerErrors'  => $errors,
@@ -163,7 +152,7 @@ try {
     }
 
     if ($action === 'indexers') {
-        json_out(['indexers' => $client->indexers()]);
+        json_response(['indexers' => $client->indexers()]);
     }
 
     if ($action === 'search') {
@@ -171,18 +160,41 @@ try {
         $top   = (string) ($_GET['top'] ?? '') === '1';
         $query = trim((string) ($_GET['q'] ?? ''));
         if ($query === '' && !$top) {
-            json_out(['query' => '', 'count' => 0, 'capped' => false, 'results' => []]);
+            json_response(['query' => '', 'count' => 0, 'capped' => false, 'results' => []]);
         }
 
         $allowedDays = [0, 1, 7, 30, 90];
         $days = in_array((int) ($_GET['days'] ?? 1), $allowedDays, true) ? (int) $_GET['days'] : 1;
 
-        $parseIds = static fn (string $raw): array => array_values(array_filter(
-            array_map('intval', explode(',', $raw)),
-            static fn (int $n): bool => $n > 0
-        ));
+        // IDs bornés : un identifiant hors plage faisait échouer Prowlarr (502),
+        // et une liste sans limite laissait construire une requête amont énorme.
+        $parseIds = static fn (string $raw): array => array_slice(
+            array_values(array_unique(array_filter(
+                array_map('intval', explode(',', $raw)),
+                static fn (int $n): bool => $n > 0 && $n < 100000
+            ))),
+            0,
+            50
+        );
         $trackers   = $parseIds((string) ($_GET['trackers'] ?? ''));
         $categories = $parseIds((string) ($_GET['cats'] ?? ''));
+
+        // Un indexeur inconnu fait échouer toute la recherche côté Prowlarr : on
+        // restreint à la liste réelle (en cache). Si plus rien ne subsiste, la
+        // sélection ne désigne aucun indexeur existant => résultat vide.
+        if ($trackers !== []) {
+            try {
+                $known = array_column($client->indexers(), 'id');
+                $filtered = array_values(array_intersect($trackers, $known));
+                if ($filtered === []) {
+                    json_response(['query' => $query, 'total' => 0, 'count' => 0, 'capped' => false, 'results' => []]);
+                }
+                $trackers = $filtered;
+            } catch (Throwable $e) {
+                // Liste indisponible : on laisse la recherche tenter sa chance.
+                error_log('[indexof] liste indexeurs indisponible : ' . $e->getMessage());
+            }
+        }
 
         // Safe-mode (-18) APPLIQUÉ CÔTÉ SERVEUR : par défaut le contenu XXX n'est
         // pas renvoyé. Il n'apparaît que si explicitement demandé (safe=0) ou si
@@ -203,7 +215,7 @@ try {
             $page
         );
 
-        json_out([
+        json_response([
             'query'   => $query,
             'total'   => $total,
             'count'   => count($results),
@@ -212,10 +224,10 @@ try {
         ]);
     }
 
-    json_out(['error' => 'Action inconnue.'], 400);
+    json_response(['error' => 'Action inconnue.'], 400);
 } catch (Throwable $exception) {
     // Détail loggé côté serveur uniquement (les messages cURL peuvent contenir
     // des hôtes/IP internes — pas de fuite au client).
     error_log('[indexof] api error: ' . $exception->getMessage());
-    json_out(['error' => 'Service momentanément indisponible.'], 502);
+    json_response(['error' => 'Service momentanément indisponible.'], 502);
 }

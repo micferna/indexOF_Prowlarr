@@ -12,9 +12,9 @@ declare(strict_types=1);
  *  4. Plafond de taille et timeouts (anti-DoS).
  */
 
-require __DIR__ . '/../src/config.php';
-require __DIR__ . '/../src/functions.php';
-require __DIR__ . '/../src/auth.php';
+require_once __DIR__ . '/../src/config.php';
+require_once __DIR__ . '/../src/functions.php';
+require_once __DIR__ . '/../src/auth.php';
 
 const MAX_BYTES     = 25 * 1024 * 1024; // 25 Mo
 const MAX_REDIRECTS = 3;
@@ -23,8 +23,7 @@ $config = load_config();
 
 require_auth($config, 'html');
 
-header('X-Content-Type-Options: nosniff');
-header('Referrer-Policy: no-referrer');
+security_headers();
 
 function fail(int $code, string $message): never
 {
@@ -42,7 +41,7 @@ if ($token === '') {
 }
 $url = open_url($token, $config['secret']);
 if ($url === null) {
-    fail(403, "Jeton invalide ou altéré.");
+    fail(403, "Lien invalide ou expiré — relancez la recherche.");
 }
 
 // Le backend Prowlarr (admin-configuré) est de confiance : ses liens de

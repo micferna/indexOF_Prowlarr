@@ -21,6 +21,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # Racine en lecture seule : le code livré ne peut pas être modifié depuis le
+    # conteneur (seul /tmp — cache + sessions, en RAM — est inscriptible).
+    read_only: true
     tmpfs:
       - /tmp
 
@@ -48,6 +51,7 @@ services:
       - SETUID
       - SETGID
       - CHOWN
+    read_only: true
     tmpfs:
       - /var/cache/nginx
       - /var/run
@@ -79,14 +83,16 @@ services:
       PUID: "1000"
       PGID: "1000"
       TZ: Europe/Paris
-      WEBUI_PORT: "8080"
+      # Port interne = port publié : qBittorrent valide l'en-tête Host (port
+      # compris), une redirection de port casserait l'accès à la WebUI.
+      WEBUI_PORT: "8081"
     volumes:
       - ./data/qbittorrent:/config
-    # WebUI : loopback uniquement. Dans qBittorrent (Settings > Web UI) : définir
-    # un mot de passe fort, activer CSRF + Host-header validation, désactiver le
-    # bypass d'authentification par sous-réseau local.
+    # WebUI : loopback uniquement, authentification obligatoire (mot de passe
+    # PBKDF2 posé dans data/qbittorrent/.../qBittorrent.conf, bypass sous-réseau
+    # et localhost désactivés, CSRF + validation d'en-tête Host actives).
     ports:
-      - "127.0.0.1:8081:8080"
+      - "127.0.0.1:8081:8081"
     networks:
       - indexof
     security_opt:

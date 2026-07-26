@@ -1,11 +1,23 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
-
 version: 2
+
+# Mises à jour automatiques : les CVE se corrigent surtout en suivant les
+# versions. Un scan qui alerte sans PR de correction ne sert à rien.
 updates:
-  - package-ecosystem: "" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  # Dépendances PHP (outils de dev : PHPStan, PHPUnit).
+  - package-ecosystem: composer
+    directory: /
     schedule:
-      interval: "weekly"
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Images de base du Dockerfile (php:8.3-fpm-alpine, nginx:1.27-alpine).
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Actions utilisées par la CI (épinglées : Dependabot les fait monter).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

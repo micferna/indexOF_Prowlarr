@@ -27,18 +27,6 @@ final class FunctionsTest extends TestCase
         $this->assertSame('#', safe_url('https://x.com/', ['magnet']));
     }
 
-    public function testSignatureRoundTrip(): void
-    {
-        $secret = 's3cret';
-        $url = 'https://tracker.example/dl?id=42';
-        $sig = sign_url($url, $secret);
-
-        $this->assertTrue(verify_url_signature($url, $sig, $secret));
-        $this->assertFalse(verify_url_signature($url, 'deadbeef', $secret));
-        $this->assertFalse(verify_url_signature($url . 'x', $sig, $secret));
-        $this->assertFalse(verify_url_signature($url, $sig, 'other-secret'));
-    }
-
     public function testIpIsPublicBlocksPrivateAndReserved(): void
     {
         $this->assertTrue(ip_is_public('8.8.8.8'));
@@ -113,6 +101,58 @@ final class FunctionsTest extends TestCase
         $this->assertNull(open_url($token . 'AA', $secret));
         $this->assertNull(open_url('nimportequoi', $secret));
         $this->assertNull(open_url('', $secret));
+    }
+
+    public function testSealTokenExpires(): void
+    {
+        $secret = str_repeat('b', 32);
+        $url = 'https://tracker.example/dl?id=42';
+
+        // Jeton déjà expiré (TTL négatif) => refusé.
+        $this->assertNull(open_url(seal_url($url, $secret, -10), $secret));
+        // Jeton valide dans la fenêtre.
+        $this->assertSame($url, open_url(seal_url($url, $secret, 60), $secret));
+        // TTL 0 = pas d'expiration.
+        $this->assertSame($url, open_url(seal_url($url, $secret, 0), $secret));
+    }
+
+    public function testThrottleKeysDoNotCollide(): void
+    {
+        $dir = sys_get_temp_dir() . '/indexof_test_' . bin2hex(random_bytes(4));
+
+        // Deux IP distinctes qui se réduisaient au même nom de fichier.
+        $this->assertNotSame(throttle_file($dir, '192.168.0.11'), throttle_file($dir, '192.168.01.1'));
+        // IPv6 : ne doit pas produire une clé vide/identique.
+        $this->assertNotSame(throttle_file($dir, '2001:db8::1'), throttle_file($dir, '2001:db8::2'));
+
+        throttle_record($dir, '10.0.0.1', 900);
+        $this->assertSame(1, throttle_failures($dir, '10.0.0.1', 900));
+        $this->assertSame(0, throttle_failures($dir, '10.0.0.2', 900));
+        throttle_reset($dir, '10.0.0.1');
+        $this->assertSame(0, throttle_failures($dir, '10.0.0.1', 900));
+
+        array_map('unlink', glob($dir . '/*') ?: []);
+        @rmdir($dir);
+    }
+
+    public function testPruneDirRemovesStaleFiles(): void
+    {
+        $dir = sys_get_temp_dir() . '/indexof_test_' . bin2hex(random_bytes(4));
+        mkdir($dir, 0700, true);
+
+        $old = $dir . '/old.json';
+        $new = $dir . '/new.json';
+        file_put_contents($old, '[]');
+        file_put_contents($new, '[]');
+        touch($old, time() - 7200);
+
+        prune_dir($dir, 3600, '*.json', 1); // chance 1/1 => purge certaine
+
+        $this->assertFileDoesNotExist($old);
+        $this->assertFileExists($new);
+
+        array_map('unlink', glob($dir . '/*') ?: []);
+        @rmdir($dir);
     }
 
     public function testIsAdultResult(): void

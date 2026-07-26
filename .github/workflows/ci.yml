@@ -4,6 +4,20 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Les CVE apparaissent après le merge : on re-scanne les images chaque semaine
+  # même sans commit.
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+# Droits minimaux par défaut ; chaque job élargit si nécessaire.
+permissions:
+  contents: read
+
+# Une exécution utile par branche : les runs dépassés sont annulés.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   quality:
@@ -16,15 +30,24 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
-          extensions: curl, json
+          extensions: curl, json, openssl
           tools: composer
           coverage: none
+
+      - name: Cohérence de composer.json / composer.lock
+        run: composer validate --strict
 
       - name: Lint PHP
         run: find src public tests -name '*.php' -print0 | xargs -0 -n1 -P4 php -l
 
+      - name: Lint JavaScript
+        run: for f in public/assets/*.js; do node --check "$f"; done
+
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Audit des dépendances (CVE)
+        run: composer audit --no-interaction
 
       - name: PHPStan
         run: vendor/bin/phpstan analyse --no-progress
@@ -33,8 +56,11 @@ jobs:
         run: vendor/bin/phpunit
 
   docker:
-    name: Build · Scan CVE
+    name: Build · CVE images · Secrets · IaC
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # remontée SARIF dans l'onglet Security
     steps:
       - uses: actions/checkout@v4
 
@@ -44,8 +70,8 @@ jobs:
       - name: Build images
         run: docker compose build
 
-      - name: Trivy scan (php)
-        uses: aquasecurity/trivy-action@master
+      - name: Trivy — CVE image php (bloquant)
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: indexof-prowlarr-php:latest
           scanners: vuln
@@ -53,11 +79,60 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
 
-      - name: Trivy scan (web)
-        uses: aquasecurity/trivy-action@master
+      - name: Trivy — CVE image web (bloquant)
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: indexof-prowlarr-web:latest
           scanners: vuln
           severity: HIGH,CRITICAL
           exit-code: '1'
           ignore-unfixed: true
+
+      # Secrets commités et mauvaises configurations (Dockerfile, compose, CI).
+      - name: Trivy — secrets et configuration (bloquant)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret,misconfig
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          skip-dirs: data,vendor
+
+      # Vue complète (toutes sévérités) publiée dans l'onglet Security, sans bloquer.
+      - name: Trivy — rapport SARIF
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          format: sarif
+          output: trivy.sarif
+          exit-code: '0'
+          skip-dirs: data,vendor
+
+      - name: Publier le rapport dans Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
+  codeql:
+    name: CodeQL (JavaScript)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialiser CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+          queries: security-and-quality
+
+      - name: Analyser
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: codeql-javascript

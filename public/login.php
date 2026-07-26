@@ -2,21 +2,14 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../src/config.php';
-require __DIR__ . '/../src/functions.php';
-require __DIR__ . '/../src/auth.php';
+require_once __DIR__ . '/../src/config.php';
+require_once __DIR__ . '/../src/functions.php';
+require_once __DIR__ . '/../src/auth.php';
 
 $config = load_config();
 start_session();
 
-header(
-    "Content-Security-Policy: default-src 'self'; img-src 'self' data:; "
-    . "style-src 'self'; script-src 'self'; form-action 'self'; "
-    . "base-uri 'none'; frame-ancestors 'none'"
-);
-header('X-Content-Type-Options: nosniff');
-header('Referrer-Policy: no-referrer');
-header('X-Frame-Options: DENY');
+html_security_headers();
 
 // Pas d'auth configurée, ou déjà connecté : on file vers l'app.
 if (!auth_enabled($config) || is_authenticated($config)) {
@@ -48,6 +41,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     } else {
         throttle_record($cacheDir, $ipKey, 900);
         throttle_record($cacheDir, 'login_global', 900);
+        prune_dir($cacheDir, 3600, 'throttle_*.json'); // compteurs oubliés (tmpfs)
         usleep(400000); // ralentit le brute-force en ligne
         $error = 'Mot de passe incorrect.';
     }

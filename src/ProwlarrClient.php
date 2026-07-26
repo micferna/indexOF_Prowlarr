@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/functions.php'; // prune_dir()
+
 /**
  * Client HTTP pour l'API Prowlarr v1.
  *
@@ -48,7 +50,9 @@ final class ProwlarrClient
      */
     public function failingIndexers(): array
     {
-        $status = $this->request('/api/v1/indexerstatus');
+        $status = $this->cached('indexerstatus', function (): array {
+            return $this->request('/api/v1/indexerstatus');
+        });
 
         $failingIds = [];
         foreach ($status as $entry) {
@@ -182,6 +186,9 @@ final class ProwlarrClient
     /**
      * Cache fichier avec TTL. Renvoie le résultat de $producer (et le met en cache).
      *
+     * Si l'appel amont échoue alors qu'une entrée périmée existe, on sert cette
+     * entrée plutôt qu'une erreur : Prowlarr qui hoquette ne casse pas la page.
+     *
      * @param callable():array<int|string,mixed> $producer
      * @return array<int|string,mixed>
      */
@@ -194,16 +201,32 @@ final class ProwlarrClient
         if (!is_dir($this->cacheDir)) {
             @mkdir($this->cacheDir, 0700, true);
         }
+        // Purge des entrées largement périmées (le cache vit en tmpfs).
+        prune_dir($this->cacheDir, max(10 * $this->cacheTtl, 3600));
+
         $file = $this->cacheDir . '/' . preg_replace('/[^a-z0-9_]/i', '', $key) . '.json';
 
-        if (is_file($file) && (time() - filemtime($file)) < $this->cacheTtl) {
+        $fresh = is_file($file) && (time() - (int) filemtime($file)) < $this->cacheTtl;
+        if ($fresh) {
             $cached = json_decode((string) file_get_contents($file), true);
             if (is_array($cached)) {
                 return $cached;
             }
         }
 
-        $data = $producer();
+        try {
+            $data = $producer();
+        } catch (Throwable $e) {
+            if (is_file($file)) {
+                $stale = json_decode((string) file_get_contents($file), true);
+                if (is_array($stale)) {
+                    error_log('[indexof] prowlarr ko, cache périmé servi (' . $key . ') : ' . $e->getMessage());
+                    return $stale;
+                }
+            }
+            throw $e;
+        }
+
         @file_put_contents($file, json_encode($data), LOCK_EX);
         return $data;
     }
