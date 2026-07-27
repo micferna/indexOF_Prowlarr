@@ -1714,3 +1714,9 @@ document.addEventListener("keydown", (e) => {
 });
 
 init();
+
+/* Installable sur téléphone. L'échec n'a aucune conséquence : le service
+   worker n'apporte que le cache des assets et l'icône d'installation. */
+if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+}

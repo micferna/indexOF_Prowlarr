@@ -20,6 +20,9 @@ $showLogout = auth_enabled($config);
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#090d12">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="apple-touch-icon" href="assets/icon-192.png">
     <meta name="csrf" content="<?php echo e($csrf); ?>">
     <title>indexOF · Recherche Prowlarr</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">

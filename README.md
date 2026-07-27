@@ -85,6 +85,8 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
   les fichiers, en deux temps, sans boîte de dialogue). Filtres d'état et actions
   groupées pour quand la liste s'allonge. Rafraîchi toutes les 3 s, uniquement
   quand la vue est ouverte.
+- **Installable sur téléphone** (PWA) : icône, plein écran, cache des seuls fichiers
+  statiques — jamais les pages ni l'API, qui dépendent de la session.
 - **Masquage des noms d'indexeurs** en un bouton, persisté localement ; le survol révèle.
 - **Filtre -18** appliqué côté serveur, indicateur des indexeurs en erreur, historique local.
 
