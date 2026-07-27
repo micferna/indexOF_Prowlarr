@@ -57,15 +57,27 @@ const QUALITY_ORDER = ["2160p", "1080p", "720p", "480p", "REMUX", "BluRay", "WEB
     "x265", "x264", "AV1", "HDR", "DV", "Atmos", "DTS", "FLAC", "MULTI", "FR", "VOSTFR"];
 const SORTABLE = ["title", "size", "seeders", "leechers", "publishDate"];
 
+/* Tranches de taille. Choisir « entre 4 et 15 Go » est le premier geste quand
+   une recherche mélange du REMUX à 70 Go et du WEB à 2 Go. Des tranches se
+   cliquent ; un curseur se règle. */
+const GO = 1024 ** 3;
+const SIZES = [
+    { id: "xs", l: "< 1 Go", min: 0, max: GO },
+    { id: "s", l: "1 – 5 Go", min: GO, max: 5 * GO },
+    { id: "m", l: "5 – 15 Go", min: 5 * GO, max: 15 * GO },
+    { id: "l", l: "15 – 40 Go", min: 15 * GO, max: 40 * GO },
+    { id: "xl", l: "> 40 Go", min: 40 * GO, max: Infinity },
+];
+
 const state = {
     query: "", days: 0, trackers: new Set(), cats: new Set(),
     mode: "search", safeMode: true,
     sort: { field: "publishDate", dir: "desc" },
-    facets: { minSeeders: 0, freeleech: false, quality: new Set() },
+    facets: { minSeeders: 0, freeleech: false, quality: new Set(), sizes: new Set(), exclude: [] },
     results: [], rawResults: [], grouping: true,
     total: 0, capped: false, page: 1, maskOn: false, loading: false,
     qbit: false, qbitCategories: [], qbitCategory: "", arr: {},
-    view: "search", transfersTab: "live", transfers: [], history: [],
+    view: "search", transfersTab: "live", transferFilter: "all", transfers: [], history: [],
     qbitNames: new Set(), store: false, saved: [],
 };
 
@@ -264,13 +276,30 @@ if (safeBtn) {
 }
 
 /* ---------- recherche ---------- */
+function parseQuery(raw) {
+    const exclude = [];
+    const kept = [];
+    for (const part of String(raw).trim().split(/\s+/)) {
+        if (part.length > 1 && part.startsWith("-")) exclude.push(part.slice(1).toLowerCase());
+        else if (part) kept.push(part);
+    }
+    return { query: kept.join(" "), exclude };
+}
+
+/** Requête telle qu'on la réécrit dans l'URL et l'historique, exclusions comprises. */
+function fullQuery() {
+    return [state.query, ...state.facets.exclude.map((m) => "-" + m)].join(" ").trim();
+}
+
 form.addEventListener("submit", (e) => {
     e.preventDefault();
     setView("search");
     state.mode = "search";
-    state.query = input.value.trim();
+    const parsed = parseQuery(input.value);
+    state.query = parsed.query;
+    state.facets.exclude = parsed.exclude;
     state.page = 1;
-    pushHistory(state.query);
+    pushHistory(fullQuery());
     runSearch();
 });
 
@@ -378,6 +407,14 @@ function facetFiltered() {
         if (f.minSeeders > 0 && x.seeders < f.minSeeders) return false;
         if (f.freeleech && !x.freeleech) return false;
         if (f.quality.size && ![...f.quality].every((q) => (x.badges || []).includes(q))) return false;
+        if (f.sizes.size) {
+            const dans = SIZES.some((b) => f.sizes.has(b.id) && x.size >= b.min && x.size < b.max);
+            if (!dans) return false;
+        }
+        if (f.exclude.length) {
+            const titre = x.title.toLowerCase();
+            if (f.exclude.some((mot) => titre.includes(mot))) return false;
+        }
         return true;
     });
 }
@@ -422,6 +459,17 @@ function renderFacets() {
         state.page = 1; renderResults(); updateFiltersCount();
     });
 
+    // Tranches de taille : on n'affiche que celles qui contiennent quelque chose,
+    // avec leur nombre — sinon on clique à l'aveugle.
+    const tailles = el("div", { class: "chips" });
+    for (const b of SIZES) {
+        const n = state.results.filter((r) => r.size >= b.min && r.size < b.max).length;
+        if (!n) continue;
+        const chip = facetChip(`${b.l} · ${n}`, () => state.facets.sizes.has(b.id),
+            () => { state.facets.sizes.has(b.id) ? state.facets.sizes.delete(b.id) : state.facets.sizes.add(b.id); });
+        tailles.append(chip);
+    }
+
     const chips = el("div", { class: "chips" });
     if (hasFree) chips.append(facetChip("Freeleech", () => state.facets.freeleech,
         () => { state.facets.freeleech = !state.facets.freeleech; }));
@@ -430,10 +478,12 @@ function renderFacets() {
             () => { state.facets.quality.has(q) ? state.facets.quality.delete(q) : state.facets.quality.add(q); }));
     });
 
-    facetsBody.replaceChildren(
+    const parts = [
         el("label", { class: "facet" }, el("span", { class: "facet-lbl", text: "Seeders" }), slider, seedVal),
-        chips,
-    );
+    ];
+    if (tailles.children.length) parts.push(tailles);
+    parts.push(chips);
+    facetsBody.replaceChildren(...parts);
     updateFiltersCount();
 }
 
@@ -453,18 +503,34 @@ function facetChip(label, isActive, toggle) {
 function facetCount() {
     return (state.facets.minSeeders > 0 ? 1 : 0)
         + (state.facets.freeleech ? 1 : 0)
-        + state.facets.quality.size;
+        + state.facets.quality.size
+        + state.facets.sizes.size;
 }
 
 function clearFacets() {
-    state.facets = { minSeeders: 0, freeleech: false, quality: new Set() };
+    // `exclude` vient de la requête (« matrix -animated »), pas d'un clic :
+    // il est reconstruit à chaque recherche, pas remis à zéro ici.
+    state.facets = {
+        minSeeders: 0, freeleech: false, quality: new Set(),
+        sizes: new Set(), exclude: state.facets ? state.facets.exclude : [],
+    };
 }
 
 /** Jetons des facettes actives, retirables d'un clic, au-dessus des résultats. */
 function activeFilterChips() {
-    if (!facetCount()) return null;
+    if (!facetCount() && !state.facets.exclude.length) return null;
     const wrap = el("span", { class: "active-filters" });
     const drop = (fn) => () => { fn(); state.page = 1; renderFacets(); renderResults(); };
+
+    // Mots exclus : retirés du champ de recherche quand on les enlève.
+    state.facets.exclude.forEach((mot) => {
+        const c = el("button", { type: "button", class: "af-chip af-excl", text: "− " + mot });
+        c.addEventListener("click", () => {
+            input.value = input.value.replace(new RegExp("\\s*-" + mot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "");
+            form.requestSubmit();
+        });
+        wrap.append(c);
+    });
 
     if (state.facets.minSeeders > 0) {
         const c = el("button", { type: "button", class: "af-chip", text: "≥ " + state.facets.minSeeders + " seed" });
@@ -479,6 +545,13 @@ function activeFilterChips() {
     [...state.facets.quality].forEach((q) => {
         const c = el("button", { type: "button", class: "af-chip", text: q });
         c.addEventListener("click", drop(() => state.facets.quality.delete(q)));
+        wrap.append(c);
+    });
+    [...state.facets.sizes].forEach((id) => {
+        const b = SIZES.find((x) => x.id === id);
+        if (!b) return;
+        const c = el("button", { type: "button", class: "af-chip", text: b.l });
+        c.addEventListener("click", drop(() => state.facets.sizes.delete(id)));
         wrap.append(c);
     });
     return wrap;
@@ -923,7 +996,7 @@ function renderHistory(h) {
 function syncUrl() {
     const p = new URLSearchParams();
     if (state.mode === "top") p.set("top", "1");
-    else if (state.query) p.set("q", state.query);
+    else if (state.query) p.set("q", fullQuery());
     if (state.days !== 0) p.set("days", state.days);
     if (state.trackers.size) p.set("trackers", [...state.trackers].join(","));
     if (state.cats.size) p.set("cats", [...state.cats].join(","));
@@ -933,7 +1006,12 @@ function syncUrl() {
 function readUrl() {
     const p = new URLSearchParams(location.search);
     if (p.get("top") === "1") state.mode = "top";
-    if (p.has("q")) { state.query = p.get("q").trim(); input.value = state.query; }
+    if (p.has("q")) {
+        const parsed = parseQuery(p.get("q"));
+        state.query = parsed.query;
+        state.facets.exclude = parsed.exclude;
+        input.value = p.get("q").trim();
+    }
     if (p.has("days")) { const d = parseInt(p.get("days"), 10); if (DAYS.some((x) => x.v === d)) state.days = d; }
     if (p.has("trackers")) p.get("trackers").split(",").map(Number).filter(Boolean).forEach((id) => state.trackers.add(id));
     if (p.has("cats")) p.get("cats").split(",").map(Number).filter(Boolean).forEach((id) => state.cats.add(id));
@@ -984,6 +1062,15 @@ const TRANSFER_STATES = {
     checkingUP: "Vérification", checkingResumeData: "Vérification",
     moving: "Déplacement", error: "Erreur", missingFiles: "Fichiers manquants",
     unknown: "Inconnu",
+};
+
+/* Les états de qBittorrent sont nombreux ; on ne raisonne que sur quatre
+   familles, celles qui décident d'une action. */
+const TRANSFER_GROUPS = {
+    all: { label: "Tous", match: () => true },
+    dl: { label: "En cours", match: (t) => t.progress < 1 && !/^(paused|stopped)/.test(t.state) },
+    up: { label: "En partage", match: (t) => t.progress >= 1 && !/^(paused|stopped)/.test(t.state) },
+    off: { label: "Arrêtés", match: (t) => /^(paused|stopped)/.test(t.state) },
 };
 
 let transfersTimer = null;
@@ -1126,6 +1213,67 @@ function renderSendHistory() {
     resultsBox.replaceChildren(meta, el("div", { class: "table-wrap" }, table));
 }
 
+function filteredTransfers() {
+    const g = TRANSFER_GROUPS[state.transferFilter] || TRANSFER_GROUPS.all;
+    return state.transfers.filter(g.match);
+}
+
+/** Filtres d'état + actions groupées : indispensables passé quelques torrents. */
+function transferControls(visibles) {
+    const wrap = el("div", { class: "tr-controls" });
+
+    const filtres = el("div", { class: "chips" });
+    for (const [id, g] of Object.entries(TRANSFER_GROUPS)) {
+        const n = state.transfers.filter(g.match).length;
+        if (id !== "all" && !n) continue;
+        const chip = el("button", { type: "button", text: `${g.label} · ${n}`,
+            class: "facet-chip" + (state.transferFilter === id ? " active" : "") });
+        chip.addEventListener("click", () => { state.transferFilter = id; renderTransfers(); });
+        filtres.append(chip);
+    }
+    wrap.append(filtres);
+
+    // Les actions groupées portent sur ce qui est affiché : ce que l'on voit est
+    // ce que l'on modifie, sans sélection à maintenir.
+    const actions = el("div", { class: "tr-bulk" });
+    const hashes = visibles.map((t) => t.hash);
+    if (!hashes.length) return wrap;
+
+    const enMarche = visibles.filter((t) => !/^(paused|stopped)/.test(t.state));
+    const arretes = visibles.filter((t) => /^(paused|stopped)/.test(t.state));
+    const finis = visibles.filter((t) => t.progress >= 1);
+
+    const bulk = (label, titre, op, liste, files) => {
+        const b = el("button", { type: "button", class: "del-choice", text: label, title: titre });
+        b.addEventListener("click", () => transferAction(liste.map((t) => t.hash).join("|"), op, files, b));
+        return b;
+    };
+
+    if (enMarche.length) actions.append(bulk(`Arrêter (${enMarche.length})`, "Arrêter les transferts affichés", "stop", enMarche, false));
+    if (arretes.length) actions.append(bulk(`Relancer (${arretes.length})`, "Relancer les transferts affichés", "start", arretes, false));
+    if (finis.length) {
+        const b = el("button", { type: "button", class: "del-choice danger",
+            text: `Retirer les terminés (${finis.length})`,
+            title: "Retire de qBittorrent les transferts terminés, sans toucher aux fichiers" });
+        b.addEventListener("click", () => {
+            if (pendingBulkDelete) {
+                pendingBulkDelete = false;
+                transferAction(finis.map((t) => t.hash).join("|"), "delete", false, b);
+                return;
+            }
+            // Deux temps, comme pour une suppression unitaire.
+            pendingBulkDelete = true;
+            b.textContent = `Confirmer (${finis.length})`;
+            b.classList.add("confirm");
+        });
+        actions.append(b);
+    }
+    wrap.append(actions);
+    return wrap;
+}
+
+let pendingBulkDelete = false;
+
 function renderTransfers() {
     hideFacets();
     observeMore(null);
@@ -1141,9 +1289,10 @@ function renderTransfers() {
         return;
     }
 
-    const total = state.transfers.reduce((n, t) => n + t.size, 0);
-    const dl = state.transfers.reduce((n, t) => n + t.dlspeed, 0);
-    const up = state.transfers.reduce((n, t) => n + t.upspeed, 0);
+    const visibles = filteredTransfers();
+    const total = visibles.reduce((n, t) => n + t.size, 0);
+    const dl = visibles.reduce((n, t) => n + t.dlspeed, 0);
+    const up = visibles.reduce((n, t) => n + t.upspeed, 0);
     const meta = el("div", { class: "meta-row" },
         transfersTabs(),
         el("span", { class: "muted", text: formatSize(total) }),
@@ -1159,9 +1308,9 @@ function renderTransfers() {
 
     const table = el("table", {},
         el("thead", {}, head),
-        el("tbody", {}, ...state.transfers.map(renderTransferRow)));
+        el("tbody", {}, ...visibles.map(renderTransferRow)));
 
-    resultsBox.replaceChildren(meta, el("div", { class: "table-wrap" }, table));
+    resultsBox.replaceChildren(meta, transferControls(visibles), el("div", { class: "table-wrap" }, table));
 }
 
 function renderTransferRow(t) {
@@ -1236,6 +1385,7 @@ function renderTransferActions(t) {
 
 async function transferAction(hash, op, files, btn) {
     pendingDelete = null;
+    pendingBulkDelete = false;
     btn.disabled = true;
     btn.classList.add("busy");
     const body = new URLSearchParams({ op, hash });

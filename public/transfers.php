@@ -39,12 +39,22 @@ if (!in_array($op, ['start', 'stop', 'delete'], true)) {
     json_response(['error' => 'Action inconnue.'], 400);
 }
 
-// Un hash de torrent est un SHA-1 (40) ou SHA-256 (64) hexadécimal. Le valider
-// évite de relayer n'importe quoi à qBittorrent, y compris « all ».
-$hash = strtolower(trim((string) ($_POST['hash'] ?? '')));
-if (preg_match('/^[a-f0-9]{40}([a-f0-9]{24})?$/', $hash) !== 1) {
+// Un hash de torrent est un SHA-1 (40) ou SHA-256 (64) hexadécimal. Les valider
+// un par un évite de relayer n'importe quoi à qBittorrent, « all » compris.
+// Plusieurs hashes sont acceptés pour les actions groupées, séparés par « | »
+// comme le fait l'API de qBittorrent.
+$raw = strtolower(trim((string) ($_POST['hash'] ?? '')));
+$hashes = [];
+foreach (array_slice(explode('|', $raw), 0, 200) as $h) {
+    $h = trim($h);
+    if (preg_match('/^[a-f0-9]{40}([a-f0-9]{24})?$/', $h) === 1) {
+        $hashes[] = $h;
+    }
+}
+if ($hashes === []) {
     json_response(['error' => 'Torrent invalide.'], 400);
 }
+$hash = implode('|', $hashes);
 
 $deleteFiles = ($_POST['files'] ?? '') === '1';
 
@@ -55,17 +65,18 @@ $qbit = new QbittorrentClient(
     $config['qbit_timeout'],
 );
 
+$n = count($hashes);
 $messages = [
-    'start'  => 'Transfert relancé',
-    'stop'   => 'Transfert arrêté',
-    'delete' => 'Torrent supprimé',
+    'start'  => $n > 1 ? "{$n} transferts relancés" : 'Transfert relancé',
+    'stop'   => $n > 1 ? "{$n} transferts arrêtés" : 'Transfert arrêté',
+    'delete' => $n > 1 ? "{$n} torrents supprimés" : 'Torrent supprimé',
 ];
 
 try {
     $qbit->control($op, $hash, $deleteFiles);
     $message = $messages[$op];
     if ($op === 'delete' && $deleteFiles) {
-        $message = 'Torrent et fichiers supprimés';
+        $message = $n > 1 ? "{$n} torrents et leurs fichiers supprimés" : 'Torrent et fichiers supprimés';
     }
     json_response(['ok' => true, 'message' => $message]);
 } catch (Throwable $e) {
