@@ -36,6 +36,7 @@ const ICONS = {
     play: "M6 3l14 9-14 9z",
     trash: "M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14",
     close: "M18 6L6 18M6 6l12 12",
+    files: "M3 7h6l2 2h10v10H3zM3 7V5h6l2 2",
 };
 /* Une icône par application *arr : téléviseur, pellicule, note, livre. */
 const ARR_ICONS = {
@@ -735,6 +736,39 @@ function renderRelease(title) {
     return frag;
 }
 
+/** Contenu d'un .torrent, déplié sous la ligne. */
+async function showContents(r, btn) {
+    const tr = btn.closest("tr");
+    const suivant = tr.nextElementSibling;
+    if (suivant && suivant.classList.contains("files-row")) { suivant.remove(); return; }
+
+    const cell = el("td", { colspan: String(COLUMNS.length) },
+        el("div", { class: "files-load", text: "Lecture du .torrent…" }));
+    const row = el("tr", { class: "files-row" }, cell);
+    tr.after(row);
+
+    try {
+        const res = await fetch("api.php?action=contents&" + new URLSearchParams({ token: r.dl.token }));
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            cell.replaceChildren(el("div", { class: "files-load", text: data.error || "Lecture impossible" }));
+            return;
+        }
+        const liste = el("div", { class: "files-list" });
+        for (const f of data.files) {
+            liste.append(el("div", { class: "files-line" },
+                el("span", { class: "files-path", text: f.path }),
+                el("span", { class: "src-num", text: f.sizeHuman })));
+        }
+        const entete = el("div", { class: "files-head" },
+            el("b", { text: `${data.files.length} fichier${data.files.length > 1 ? "s" : ""}` }),
+            el("span", { class: "muted", text: ` · ${data.sizeHuman}` }));
+        cell.replaceChildren(entete, liste);
+    } catch (e) {
+        cell.replaceChildren(el("div", { class: "files-load", text: "Lecture impossible" }));
+    }
+}
+
 /** Déplie (ou replie) la liste des autres trackers d'une release groupée. */
 function toggleSources(tr, others, btn) {
     const open = tr.nextElementSibling && tr.nextElementSibling.classList.contains("src-row");
@@ -836,6 +870,9 @@ function renderActions(r) {
     if (r.dl) {
         wrap.append(el("a", { class: "act act-dl", href: torrentHref(r.dl), title: "Télécharger le .torrent" },
             svgIcon(ICONS.download)));
+        // Savoir ce qu'il y a dedans avant de le prendre.
+        wrap.append(makeBtn("act act-files", ICONS.files, "Voir le contenu du .torrent",
+            (btn) => showContents(r, btn)));
         any = true;
     }
     if (r.magnet) {

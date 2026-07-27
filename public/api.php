@@ -20,6 +20,8 @@ require_once __DIR__ . '/../src/ProwlarrClient.php';
 require_once __DIR__ . '/../src/QbittorrentClient.php';
 require_once __DIR__ . '/../src/Store.php';
 require_once __DIR__ . '/../src/Search.php';
+require_once __DIR__ . '/../src/TorrentFetcher.php';
+require_once __DIR__ . '/../src/Bencode.php';
 
 $config = load_config();
 
@@ -115,6 +117,32 @@ try {
         }
         usort($rows, static fn (array $a, array $b): int => $b['latency'] <=> $a['latency']);
         json_response(['indexers' => $rows]);
+    }
+
+    // Contenu d'un .torrent avant de le prendre : fichier unique ou pack de
+    // quarante épisodes ? Sans ça, il faut télécharger pour savoir.
+    if ($action === 'contents') {
+        $url = open_url((string) ($_GET['token'] ?? ''), $config['secret']);
+        if ($url === null) {
+            json_response(['error' => 'Lien invalide ou expiré.'], 403);
+        }
+        try {
+            $summary = Bencode::summarize(fetch_torrent($url, $config));
+        } catch (TorrentFetchError $e) {
+            error_log('[indexof] contents: ' . $e->getMessage());
+            json_response(['error' => $e->getMessage()], $e->getCode() >= 400 ? $e->getCode() : 502);
+        }
+        if ($summary === null) {
+            json_response(['error' => 'Fichier .torrent illisible.'], 422);
+        }
+        // Les plus gros fichiers d'abord : c'est le film, le reste est annexe.
+        usort($summary['files'], static fn (array $a, array $b): int => $b['size'] <=> $a['size']);
+        foreach ($summary['files'] as &$f) {
+            $f['sizeHuman'] = format_size($f['size']);
+        }
+        unset($f);
+        $summary['sizeHuman'] = format_size($summary['size']);
+        json_response($summary);
     }
 
     if ($action === 'indexers') {

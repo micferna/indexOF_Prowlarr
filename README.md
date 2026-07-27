@@ -56,6 +56,12 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
 - **Filtres** réunis dans un seul panneau — période, catégories, indexeurs, puis affinage
   (seeders minimum, freeleech, qualité) sur les résultats affichés. Ce qui est actif
   remonte en jetons retirables au-dessus de la liste.
+- **Contenu du `.torrent`** avant de le prendre : un fichier ou un pack de quarante
+  épisodes ? La liste se déplie sous la ligne, sans rien télécharger dans qBittorrent.
+- **Santé des indexeurs** : cliquez sur l'indicateur d'état pour voir la latence, le
+  volume et les échecs de chacun. C'est ce qui explique une recherche qui traîne.
+- **Filtre par taille** (tranches cliquables) et **exclusion de mots** dans la
+  requête : `matrix -animated`.
 - **Doublons regroupés** : la même release publiée sur plusieurs trackers tient
   sur une ligne, menée par la source la mieux seedée. Les autres sont repliées
   derrière un « +N » et restent téléchargeables individuellement.
@@ -76,8 +82,9 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
   garde la trace même après suppression du torrent.
 - **Transferts** : ce que qBittorrent télécharge ou partage, sans quitter l'app —
   progression, ratio, vitesses, état. Arrêt, relance et suppression (avec ou sans
-  les fichiers, en deux temps, sans boîte de dialogue). Rafraîchi toutes les 3 s,
-  uniquement quand la vue est ouverte.
+  les fichiers, en deux temps, sans boîte de dialogue). Filtres d'état et actions
+  groupées pour quand la liste s'allonge. Rafraîchi toutes les 3 s, uniquement
+  quand la vue est ouverte.
 - **Masquage des noms d'indexeurs** en un bouton, persisté localement ; le survol révèle.
 - **Filtre -18** appliqué côté serveur, indicateur des indexeurs en erreur, historique local.
 
@@ -179,7 +186,10 @@ src/                    # Hors racine web
   auth.php              # Session, mot de passe, jeton CSRF
   ProwlarrClient.php    # Client API Prowlarr (cURL, X-Api-Key, cache, timeouts)
   QbittorrentClient.php # Client Web API qBittorrent (ajout par URL/magnet)
-  functions.php         # Échappement, URL, jetons scellés, anti-SSRF, formatage
+  functions.php         # Échappement, URL, jetons scellés, XML, formatage
+  Search.php            # Recherche partagée par l'API et les flux RSS
+  TorrentFetcher.php    # Récupération .torrent anti-SSRF (proxy + aperçu)
+  Bencode.php           # Lecture du contenu d'un .torrent
   ArrClient.php         # Client Sonarr/Radarr/Lidarr/Readarr (release/push)
   Store.php             # Base SQLite : envois mémorisés, recherches enregistrées
 tests/                  # Tests PHPUnit (fonctions critiques)
