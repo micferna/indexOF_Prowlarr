@@ -51,7 +51,8 @@ const state = {
     mode: "search", safeMode: true,
     sort: { field: "publishDate", dir: "desc" },
     facets: { minSeeders: 0, freeleech: false, quality: new Set() },
-    results: [], total: 0, capped: false, page: 1, maskOn: false, loading: false,
+    results: [], rawResults: [], grouping: true,
+    total: 0, capped: false, page: 1, maskOn: false, loading: false,
     qbit: false, qbitCategories: [], qbitCategory: "",
 };
 
@@ -63,6 +64,7 @@ const daysBox = $("#days");
 const catsBox = $("#categories");
 const chipsBox = $("#trackers");
 const maskBtn = $("#mask-toggle");
+const groupBtn = $("#group-toggle");
 const topBtn = $("#top-btn");
 const safeBtn = $("#safe-toggle");
 const filtersBtn = $("#filters-btn");
@@ -205,6 +207,23 @@ maskBtn.addEventListener("click", () => {
     applyMask();
 });
 
+/* ---------- regroupement ---------- */
+function applyGrouping() {
+    if (!groupBtn) return;
+    groupBtn.setAttribute("aria-pressed", String(state.grouping));
+}
+if (groupBtn) {
+    groupBtn.addEventListener("click", () => {
+        state.grouping = !state.grouping;
+        try { localStorage.setItem("grouping", state.grouping ? "1" : "0"); } catch (e) {}
+        applyGrouping();
+        // Rien à redemander au serveur : on regroupe ce qu'on a déjà.
+        state.results = groupResults(state.rawResults);
+        state.page = 1;
+        renderResults();
+    });
+}
+
 /* ---------- safe-mode (-18) ---------- */
 function applySafe() {
     if (!safeBtn) return;
@@ -258,6 +277,7 @@ async function runSearch() {
     if (!top && !state.query) { state.results = []; renderIdle(); return; }
     setLoading(true);
     clearFacets();
+    selIndex = -1;
     renderSkeleton();
 
     const p = new URLSearchParams({ action: "search", days: state.days });
@@ -276,8 +296,9 @@ async function runSearch() {
         if (seq !== searchSeq) return; // réponse dépassée
         if (res.status === 401) { location.href = "login.php"; return; }
         if (data.error) { renderError(data.error); return; }
-        state.results = data.results || [];
-        state.total = data.total || state.results.length;
+        state.rawResults = data.results || [];
+        state.results = groupResults(state.rawResults);
+        state.total = data.total || state.rawResults.length;
         state.capped = !!data.capped;
         renderFacets();
         renderResults();
@@ -290,6 +311,42 @@ async function runSearch() {
 }
 
 function setLoading(on) { state.loading = on; submitBtn.disabled = on; }
+
+/* ---------- regroupement des doublons ----------
+   La même release est publiée sur plusieurs trackers : sur une recherche
+   courante, jusqu'à 18 % des lignes sont des répétitions. On les réunit en une
+   seule entrée, en gardant la meilleure source (le plus de seeders) et en
+   conservant les autres sous la main.
+
+   Le rapprochement se fait sur le nom complet normalisé, groupe de release
+   compris : deux encodages différents du même film restent deux lignes. Mieux
+   vaut un doublon affiché qu'une release masquée à tort. */
+function groupKey(title) {
+    return title.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function groupResults(list) {
+    // `best` désigne la source qui mène l'entrée. L'entrée étant une copie, on
+    // ne peut pas la comparer par identité aux éléments de `sources` : sans ce
+    // repère, chaque ligne se croirait dupliquée avec elle-même.
+    if (!state.grouping) return list.map((r) => ({ ...r, best: r, sources: [r] }));
+
+    const groups = new Map();
+    for (const r of list) {
+        const key = groupKey(r.title);
+        const existing = groups.get(key);
+        if (!existing) {
+            groups.set(key, { ...r, best: r, sources: [r] });
+            continue;
+        }
+        existing.sources.push(r);
+        // La meilleure source mène l'entrée : c'est elle qu'on télécharge.
+        if (r.seeders > existing.seeders) {
+            groups.set(key, { ...r, best: r, sources: existing.sources });
+        }
+    }
+    return [...groups.values()];
+}
 
 /* ---------- facettes + tri ---------- */
 function facetFiltered() {
@@ -456,7 +513,9 @@ function renderResults() {
     // Compte : ce qui est affiché, et sur quel total.
     const left = el("span", {}, el("b", { text: String(all.length) }), ` résultat${all.length > 1 ? "s" : ""}`);
     if (all.length < state.results.length) left.append(el("span", { class: "muted", text: ` sur ${state.results.length}` }));
-    else if (state.total > state.results.length) left.append(el("span", { class: "muted", text: ` sur ${state.total}` }));
+    else if (state.total > state.rawResults.length) left.append(el("span", { class: "muted", text: ` sur ${state.total}` }));
+    const replies = state.rawResults.length - state.results.length;
+    if (replies > 0) left.append(el("span", { class: "muted", text: ` · ${replies} doublon${replies > 1 ? "s" : ""} replié${replies > 1 ? "s" : ""}` }));
 
     const right = el("span", { class: "meta-actions" });
     if (state.days !== 0) {
@@ -487,6 +546,7 @@ function renderResults() {
     }
     resultsBox.replaceChildren(...parts);
     observeMore(more);
+    paintSelection(false);
 }
 
 function loadMore() {
@@ -581,6 +641,28 @@ function renderRelease(title) {
     return frag;
 }
 
+/** Déplie (ou replie) la liste des autres trackers d'une release groupée. */
+function toggleSources(tr, others, btn) {
+    const open = tr.nextElementSibling && tr.nextElementSibling.classList.contains("src-row");
+    if (open) {
+        tr.nextElementSibling.remove();
+        btn.setAttribute("aria-expanded", "false");
+        return;
+    }
+    const list = el("div", { class: "src-list" });
+    for (const s of others) {
+        const line = el("div", { class: "src-line" },
+            el("span", { class: "idx-tag maskable", text: s.indexer }),
+            el("span", { class: "src-num", text: s.sizeHuman }),
+            el("span", { class: "src-num", text: `${s.seeders} seed` }));
+        line.append(renderActions(s));
+        list.append(line);
+    }
+    const row = el("tr", { class: "src-row" }, el("td", { colspan: String(COLUMNS.length) }, list));
+    tr.after(row);
+    btn.setAttribute("aria-expanded", "true");
+}
+
 function renderRow(r) {
     const tr = el("tr");
 
@@ -599,6 +681,20 @@ function renderRow(r) {
 
     const meta = el("div", { class: "rel-meta" });
     meta.append(el("span", { class: "idx-tag maskable", text: r.indexer }));
+
+    // Autres trackers proposant la même release : repliés, jamais perdus.
+    // Sur un tracker privé, choisir sa source a des conséquences de ratio.
+    const others = (r.sources || []).filter((s) => s !== r.best);
+    if (others.length) {
+        const btn = el("button", {
+            type: "button", class: "src-btn", text: `+${others.length}`,
+            title: `Aussi sur : ${others.map((s) => s.indexer).join(", ")}`,
+            "aria-expanded": "false",
+        });
+        btn.addEventListener("click", () => toggleSources(tr, others, btn));
+        meta.append(btn);
+    }
+
     if (r.category) {
         meta.append(el("span", { class: "sep", text: "·" }), el("span", { text: r.category }));
     }
@@ -788,8 +884,10 @@ async function init() {
     try { const sd = parseInt(localStorage.getItem("days"), 10); if (DAYS.some((x) => x.v === sd)) state.days = sd; } catch (e) {}
     try { const so = JSON.parse(localStorage.getItem("sort") || "null"); if (so && SORTABLE.includes(so.field) && (so.dir === "asc" || so.dir === "desc")) state.sort = so; } catch (e) {}
     try { state.qbitCategory = localStorage.getItem("qbitCat") || ""; } catch (e) {}
+    try { state.grouping = localStorage.getItem("grouping") !== "0"; } catch (e) {}
     applyMask();
     applySafe();
+    applyGrouping();
     readUrl();
     if (state.mode === "top") state.sort = { field: "publishDate", dir: "desc" };
     renderDays();
@@ -806,4 +904,105 @@ async function init() {
 
     if (state.mode === "top" || state.query) runSearch();
 }
+
+/* ==================================================================
+   Raccourcis clavier
+
+   L'outil sert à parcourir une liste et agir sur une ligne : la souris
+   n'est pas le bon instrument pour ça. Les touches suivent la logique
+   de vi (j/k) et de la plupart des lecteurs de flux.
+   ================================================================== */
+const SHORTCUTS = [
+    ["/", "Aller au champ de recherche"],
+    ["j / k", "Ligne suivante / précédente"],
+    ["Entrée", "Ouvrir la page de la release"],
+    ["d", "Télécharger le .torrent"],
+    ["e", "Envoyer à qBittorrent"],
+    ["c", "Copier le magnet"],
+    ["t", "Derniers uploads (Top)"],
+    ["f", "Ouvrir les filtres"],
+    ["g", "Grouper / dégrouper les doublons"],
+    ["?", "Afficher cette aide"],
+    ["Échap", "Fermer / quitter le champ"],
+];
+
+let selIndex = -1;
+
+function selectableRows() {
+    return [...document.querySelectorAll("#results tbody tr:not(.src-row)")];
+}
+
+/** Réapplique la sélection après un rendu, et la garde dans les bornes. */
+function paintSelection(scroll) {
+    const rows = selectableRows();
+    rows.forEach((r) => r.classList.remove("row-sel"));
+    if (selIndex < 0 || !rows.length) return;
+    selIndex = Math.min(selIndex, rows.length - 1);
+    const row = rows[selIndex];
+    row.classList.add("row-sel");
+    if (scroll) row.scrollIntoView({ block: "nearest" });
+}
+
+function moveSelection(delta) {
+    const rows = selectableRows();
+    if (!rows.length) return;
+    selIndex = selIndex < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, selIndex + delta));
+    paintSelection(true);
+}
+
+/** Déclenche une action de la ligne sélectionnée (le clic fait déjà le travail). */
+function actOnSelection(selector) {
+    const row = selectableRows()[selIndex];
+    const target = row && row.querySelector(selector);
+    if (!target) { toast("Action indisponible sur cette ligne"); return; }
+    target.click();
+}
+
+function toggleHelp(force) {
+    const existing = $("#help-overlay");
+    if (existing) { existing.remove(); return; }
+    if (force === false) return;
+
+    const rows = SHORTCUTS.map(([key, label]) => el("div", { class: "help-row" },
+        el("kbd", { text: key }), el("span", { text: label })));
+    const panel = el("div", { class: "help-panel", role: "dialog", "aria-modal": "true",
+        "aria-label": "Raccourcis clavier" },
+        el("h2", { class: "help-title", text: "Raccourcis" }),
+        el("div", { class: "help-grid" }, ...rows),
+        el("p", { class: "help-foot", text: "Échap ou ? pour fermer" }));
+    const overlay = el("div", { id: "help-overlay", class: "help-overlay" }, panel);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+    document.body.append(overlay);
+    panel.tabIndex = -1;
+    panel.focus();
+}
+
+document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+    const inField = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+    if (e.key === "Escape") {
+        if ($("#help-overlay")) { toggleHelp(); return; }
+        if (inField) document.activeElement.blur();
+        return;
+    }
+    // Dans un champ, on ne détourne rien : l'utilisateur écrit.
+    if (inField) return;
+
+    switch (e.key) {
+        case "/":       e.preventDefault(); input.focus(); input.select(); break;
+        case "j":       e.preventDefault(); moveSelection(1); break;
+        case "k":       e.preventDefault(); moveSelection(-1); break;
+        case "Enter":   if (selIndex >= 0) { e.preventDefault(); actOnSelection("a.rel"); } break;
+        case "d":       if (selIndex >= 0) { e.preventDefault(); actOnSelection(".act-dl"); } break;
+        case "e":       if (selIndex >= 0) { e.preventDefault(); actOnSelection(".act-qbit"); } break;
+        case "c":       if (selIndex >= 0) { e.preventDefault(); actOnSelection(".act-copy"); } break;
+        case "t":       e.preventDefault(); if (topBtn) topBtn.click(); break;
+        case "f":       e.preventDefault(); if (filtersBtn) filtersBtn.click(); break;
+        case "g":       e.preventDefault(); if (groupBtn) groupBtn.click(); break;
+        case "?":       e.preventDefault(); toggleHelp(); break;
+        default: break;
+    }
+});
+
 init();

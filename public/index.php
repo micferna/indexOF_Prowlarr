@@ -67,12 +67,19 @@ $showLogout = auth_enabled($config);
                     <div id="facets-body"></div>
                 </div>
                 <div class="fp-foot">
-                    <button type="button" id="mask-toggle" class="mask-btn" aria-pressed="false"
-                            title="Masquer / révéler les noms d'indexeurs">
-                        <svg class="ic-eye" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
-                        <svg class="ic-eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 10.6a3 3 0 0 0 4.2 4.2M9.9 5.1A10.9 10.9 0 0 1 12 5c7 0 11 7 11 7a18.5 18.5 0 0 1-3.2 4M6.6 6.6A18.6 18.6 0 0 0 1 12s4 7 11 7a10.9 10.9 0 0 0 3.4-.5"/></svg>
-                        <span class="mask-label">Masquer noms</span>
-                    </button>
+                    <div class="fp-toggles">
+                        <button type="button" id="mask-toggle" class="mask-btn" aria-pressed="false"
+                                title="Masquer / révéler les noms d'indexeurs">
+                            <svg class="ic-eye" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                            <svg class="ic-eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 10.6a3 3 0 0 0 4.2 4.2M9.9 5.1A10.9 10.9 0 0 1 12 5c7 0 11 7 11 7a18.5 18.5 0 0 1-3.2 4M6.6 6.6A18.6 18.6 0 0 0 1 12s4 7 11 7a10.9 10.9 0 0 0 3.4-.5"/></svg>
+                            <span class="mask-label">Masquer noms</span>
+                        </button>
+                        <button type="button" id="group-toggle" class="mask-btn" aria-pressed="true"
+                                title="Réunir en une ligne la même release publiée sur plusieurs trackers">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17l9 5 9-5"/></svg>
+                            <span>Grouper les doublons</span>
+                        </button>
+                    </div>
                     <button type="button" id="filters-reset" class="link-btn">Réinitialiser</button>
                 </div>
             </div>
