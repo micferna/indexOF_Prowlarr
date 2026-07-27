@@ -147,6 +147,8 @@ try {
             'indexerErrors'  => $errors,
             'qbit'           => $qbitOn,
             'qbitCategories' => $qbitCats,
+            // Cibles *arr actives : le front n'affiche que ces boutons-là.
+            'arr'            => array_map(static fn (array $t): string => $t['label'], $config['arr']),
             'authEnabled'    => auth_enabled($config),
         ]);
     }

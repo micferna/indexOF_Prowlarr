@@ -92,11 +92,63 @@ services:
       WEBUI_PORT: "8081"
     volumes:
       - ./data/qbittorrent:/config
+      # qBittorrent enregistre dans /downloads : sans ce montage, les fichiers
+      # restent dans la couche du conteneur et disparaissent à sa recréation.
+      # Le chemin doit être identique côté Sonarr/Radarr pour qu'ils retrouvent
+      # les téléchargements terminés.
+      - ./data/downloads:/downloads
     # WebUI : loopback uniquement, authentification obligatoire (mot de passe
     # PBKDF2 posé dans data/qbittorrent/.../qBittorrent.conf, bypass sous-réseau
     # et localhost désactivés, CSRF + validation d'en-tête Host actives).
     ports:
       - "127.0.0.1:8081:8081"
+    networks:
+      - indexof
+    security_opt:
+      - no-new-privileges:true
+
+  # ------------------------------------------------------------------
+  # Applications *arr — optionnelles, derrière un profil : rien ne démarre
+  # sans `docker compose --profile arr up -d`.
+  #
+  # Une fois lancées : récupérez leur clé API (Settings > General), mettez-la
+  # dans .env (SONARR_URL/SONARR_API_KEY…), et le bouton d'envoi apparaît sur
+  # chaque résultat. Dans Prowlarr, ajoutez-les en « Apps » pour qu'il y
+  # synchronise vos indexeurs.
+  # ------------------------------------------------------------------
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: indexof_sonarr
+    profiles: ["arr"]
+    restart: unless-stopped
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/Paris
+    volumes:
+      - ./data/sonarr:/config
+      - ./data/downloads:/downloads
+    ports:
+      - "127.0.0.1:8989:8989"
+    networks:
+      - indexof
+    security_opt:
+      - no-new-privileges:true
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: indexof_radarr
+    profiles: ["arr"]
+    restart: unless-stopped
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/Paris
+    volumes:
+      - ./data/radarr:/config
+      - ./data/downloads:/downloads
+    ports:
+      - "127.0.0.1:7878:7878"
     networks:
       - indexof
     security_opt:

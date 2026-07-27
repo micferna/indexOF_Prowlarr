@@ -56,10 +56,16 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
 - **Filtres** réunis dans un seul panneau — période, catégories, indexeurs, puis affinage
   (seeders minimum, freeleech, qualité) sur les résultats affichés. Ce qui est actif
   remonte en jetons retirables au-dessus de la liste.
+- **Doublons regroupés** : la même release publiée sur plusieurs trackers tient
+  sur une ligne, menée par la source la mieux seedée. Les autres sont repliées
+  derrière un « +N » et restent téléchargeables individuellement.
 - **Défilement infini** : la suite se charge en descendant.
+- **Raccourcis clavier** : `/` recherche, `j`/`k` navigation, `Entrée` ouvrir,
+  `d` télécharger, `e` envoyer, `c` copier le magnet, `?` l'aide complète.
 - **Tri** par titre, taille, seeders ou âge, mémorisé, accessible au clavier.
 - **Actions** : télécharger le `.torrent` (proxy chiffré), ouvrir ou copier le magnet,
-  envoyer à qBittorrent avec choix de la catégorie.
+  envoyer à qBittorrent avec choix de la catégorie, ou pousser la release vers
+  Sonarr / Radarr / Lidarr / Readarr.
 - **Masquage des noms d'indexeurs** en un bouton, persisté localement ; le survol révèle.
 - **Filtre -18** appliqué côté serveur, indicateur des indexeurs en erreur, historique local.
 
@@ -77,6 +83,10 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
 | `QBITTORRENT_USER` / `QBITTORRENT_PASS` | Identifiants de la Web UI qBittorrent | `admin` / _(vide)_ |
 | `PROWLARR_TIMEOUT` | Délai d'une recherche (s). Les trackers sont interrogés en direct | `45` |
 | `QBITTORRENT_TIMEOUT` | Délai des appels qBittorrent (s) | `15` |
+| `SONARR_URL` / `SONARR_API_KEY` | Sonarr. Vide = bouton absent | _(vide)_ |
+| `RADARR_URL` / `RADARR_API_KEY` | Radarr | _(vide)_ |
+| `LIDARR_URL` / `LIDARR_API_KEY` | Lidarr | _(vide)_ |
+| `READARR_URL` / `READARR_API_KEY` | Readarr | _(vide)_ |
 | `TRUST_PROXY` | `1` seulement derrière un reverse-proxy qui pose `X-Forwarded-For` | `0` |
 | `CACHE_TTL` | Durée du cache recherches/indexeurs (s) | `120` |
 | `CACHE_DIR` | Répertoire de cache | `/tmp/indexof_cache` |
@@ -88,6 +98,30 @@ Renseignez `QBITTORRENT_URL` (ex. `http://qbittorrent:8081`) pour faire apparaî
 N'utilisez **pas** le contournement d'authentification par sous-réseau (*Options → Web UI → Bypass authentication for clients in whitelisted IP subnets*) : il ouvre la Web UI — donc le contrôle total du client BitTorrent, y compris l'exécution d'un programme externe — à tout ce qui atteint le réseau Docker. La Web UI doit exiger un mot de passe, avec *CSRF protection* et *Host header validation* actives.
 
 > Le port publié doit être identique au port interne (`WEBUI_PORT`) : qBittorrent valide le port de l'en-tête `Host` et rejette tout le reste.
+
+## Sonarr, Radarr et consorts
+
+L'application ne remplace pas les *arr : elle leur passe le relais. Un bouton par
+application apparaît sur chaque résultat dès que son URL et sa clé API sont
+renseignées. La release est poussée via `release/push` ; l'application la parse,
+la rapproche de ce qu'elle suit, applique ses profils de qualité et la confie à
+son propre client de téléchargement.
+
+Le retour est affiché tel quel : « acceptée et mise en téléchargement », ou le
+motif du refus (« Unknown Series », qualité déjà présente…). Pas de faux succès.
+
+Sonarr et Radarr sont fournis dans le `docker-compose.yml`, derrière un profil —
+rien ne démarre sans le demander :
+
+```bash
+docker compose --profile arr up -d
+```
+
+- Sonarr : <http://localhost:8989> · Radarr : <http://localhost:7878>
+- Récupérez la clé API de chacun (*Settings → General*) et reportez-la dans `.env`.
+- Dans Prowlarr, ajoutez-les en **Apps** : il y synchronisera vos indexeurs.
+- Les trois services partagent `./data/downloads` : c'est ce qui permet aux *arr
+  de retrouver les fichiers que qBittorrent a terminés.
 
 ## Sécurité
 

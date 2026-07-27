@@ -3,6 +3,28 @@
 declare(strict_types=1);
 
 /**
+ * Cibles *arr configurées : SONARR_URL + SONARR_API_KEY, RADARR_*, etc.
+ *
+ * @param callable(string,?string):?string $get
+ * @return array<string,array{label:string,api:string,url:string,key:string}>
+ */
+function arr_targets(callable $get): array
+{
+    require_once __DIR__ . '/ArrClient.php';
+
+    $targets = [];
+    foreach (ArrClient::TARGETS as $name => $meta) {
+        $url = rtrim((string) $get(strtoupper($name) . '_URL', ''), '/');
+        $key = (string) $get(strtoupper($name) . '_API_KEY', '');
+        if ($url === '' || $key === '') {
+            continue;
+        }
+        $targets[$name] = $meta + ['url' => $url, 'key' => $key];
+    }
+    return $targets;
+}
+
+/**
  * Charge la configuration depuis les variables d'environnement (priorité Docker)
  * avec repli sur un fichier .env à la racine du projet pour le développement local.
  *
@@ -10,7 +32,8 @@ declare(strict_types=1);
  *   api_key:string, base_url:string, secret:string,
  *   timeout:int, qbit_timeout:int, cache_ttl:int, cache_dir:string,
  *   password:string, limit:int,
- *   qbit_url:string, qbit_user:string, qbit_pass:string
+ *   qbit_url:string, qbit_user:string, qbit_pass:string,
+ *   arr:array<string,array{label:string,api:string,url:string,key:string}>
  * }
  */
 function load_config(): array
@@ -85,6 +108,9 @@ function load_config(): array
         'qbit_url'     => rtrim((string) $get('QBITTORRENT_URL', ''), '/'),
         'qbit_user'    => (string) $get('QBITTORRENT_USER', ''),
         'qbit_pass'    => (string) $get('QBITTORRENT_PASS', ''),
+        // Applications *arr : chaque cible n'est active que si son URL et sa
+        // clé API sont renseignées. Vide = bouton absent de l'interface.
+        'arr'          => arr_targets($get),
     ];
 
     return $config;

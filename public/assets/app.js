@@ -33,6 +33,13 @@ const ICONS = {
     send: "M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z",
     copy: "M9 9h10v10H9zM5 15H4V4h11v1",
 };
+/* Une icône par application *arr : téléviseur, pellicule, note, livre. */
+const ARR_ICONS = {
+    sonarr: "M3 7h18v12H3zM8 3l4 4 4-4",
+    radarr: "M4 4h16v16H4zM4 9h16M4 15h16M9 4v16M15 4v16",
+    lidarr: "M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
+    readarr: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z",
+};
 function svgIcon(d) {
     const svg = document.createElementNS(SVGNS, "svg");
     svg.setAttribute("viewBox", "0 0 24 24");
@@ -53,7 +60,7 @@ const state = {
     facets: { minSeeders: 0, freeleech: false, quality: new Set() },
     results: [], rawResults: [], grouping: true,
     total: 0, capped: false, page: 1, maskOn: false, loading: false,
-    qbit: false, qbitCategories: [], qbitCategory: "",
+    qbit: false, qbitCategories: [], qbitCategory: "", arr: {},
 };
 
 const $ = (s) => document.querySelector(s);
@@ -740,8 +747,16 @@ function renderActions(r) {
         any = true;
     }
     if (state.qbit && r.send) {
-        wrap.append(makeBtn("act act-qbit", ICONS.send, "Envoyer à qBittorrent", (btn) => sendToQbit(r, btn)));
+        wrap.append(makeBtn("act act-qbit", ICONS.send, "Envoyer à qBittorrent", (btn) => sendTo(r, btn, "qbit")));
         any = true;
+    }
+    // Applications *arr : elles décident elles-mêmes quoi faire de la release.
+    if (r.send) {
+        for (const [name, label] of Object.entries(state.arr)) {
+            wrap.append(makeBtn("act act-arr act-" + name, ARR_ICONS[name] || ICONS.send,
+                `Envoyer à ${label}`, (btn) => sendTo(r, btn, name)));
+            any = true;
+        }
     }
     if (!any) wrap.append(el("span", { class: "dl-none", text: "—" }));
     return wrap;
@@ -759,12 +774,21 @@ async function copyText(text) {
     catch (e) { toast("Copie impossible"); }
 }
 
-async function sendToQbit(r, btn) {
+async function sendTo(r, btn, to) {
     btn.disabled = true;
     btn.classList.add("busy");
     const body = new URLSearchParams();
     body.set("token", r.send);
-    if (state.qbitCategory) body.set("category", state.qbitCategory);
+    body.set("to", to);
+    if (to === "qbit") {
+        if (state.qbitCategory) body.set("category", state.qbitCategory);
+    } else {
+        // Sonarr/Radarr rapprochent la release de ce qu'ils suivent : ils ont
+        // besoin du titre, de l'indexeur et de la date de publication.
+        body.set("title", r.title);
+        body.set("indexer", r.indexer || "");
+        body.set("publishDate", r.publishDate || "");
+    }
     try {
         const res = await fetch("send.php", {
             method: "POST",
@@ -772,10 +796,18 @@ async function sendToQbit(r, btn) {
             body: body.toString(),
         });
         const data = await res.json().catch(() => ({}));
-        if (res.ok && data.ok) { btn.classList.add("done"); toast("Envoyé à qBittorrent"); }
-        else { btn.classList.remove("busy"); btn.disabled = false; toast(data.error || "Échec de l'envoi"); }
+        if (res.ok && data.ok) {
+            btn.classList.add("done");
+            toast(data.message || "Envoyé");
+        } else {
+            btn.classList.remove("busy");
+            btn.disabled = false;
+            toast(data.error || "Échec de l'envoi");
+        }
     } catch (e) {
-        btn.classList.remove("busy"); btn.disabled = false; toast("Échec de l'envoi");
+        btn.classList.remove("busy");
+        btn.disabled = false;
+        toast("Échec de l'envoi");
     }
 }
 
@@ -798,6 +830,7 @@ async function loadStatus() {
         const s = await res.json();
         state.qbit = !!s.qbit;
         state.qbitCategories = s.qbitCategories || [];
+        state.arr = s.arr || {};
         renderQbitCategories();
 
         const dot = statusBox.querySelector(".status-dot");

@@ -3,14 +3,24 @@
 declare(strict_types=1);
 
 /**
- * Envoie un torrent (URL .torrent signée, ou lien magnet) vers qBittorrent.
- * POST uniquement. Protégé par auth + CSRF ; les URLs HTTP doivent être signées.
+ * Envoie une release vers un client de téléchargement.
+ *
+ *   POST send.php  token=<jeton scellé>  [to=qbit|sonarr|radarr|lidarr|readarr]
+ *
+ * `to=qbit` ajoute directement le torrent à qBittorrent. Les autres cibles
+ * poussent la release vers l'application *arr correspondante, qui la rapproche
+ * de ce qu'elle suit, applique ses profils et la confie à son propre client.
+ *
+ * POST uniquement, protégé par authentification + CSRF. La cible réelle vient
+ * toujours d'un jeton scellé par l'application : impossible d'injecter une URL
+ * arbitraire.
  */
 
 require_once __DIR__ . '/../src/config.php';
 require_once __DIR__ . '/../src/functions.php';
 require_once __DIR__ . '/../src/auth.php';
 require_once __DIR__ . '/../src/QbittorrentClient.php';
+require_once __DIR__ . '/../src/ArrClient.php';
 
 $config = load_config();
 
@@ -26,14 +36,22 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 if (!verify_csrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($_POST['csrf'] ?? null))) {
     json_response(['error' => 'Jeton CSRF invalide.'], 403);
 }
-if (!QbittorrentClient::isConfigured($config['qbit_url'])) {
-    json_response(['error' => 'qBittorrent n\'est pas configuré.'], 400);
+
+$to = (string) ($_POST['to'] ?? 'qbit');
+if ($to !== 'qbit' && !ArrClient::isKnown($to)) {
+    json_response(['error' => 'Destination inconnue.'], 400);
+}
+if ($to === 'qbit' && !QbittorrentClient::isConfigured($config['qbit_url'])) {
+    json_response(['error' => "qBittorrent n'est pas configuré."], 400);
+}
+if ($to !== 'qbit' && !isset($config['arr'][$to])) {
+    json_response(['error' => ArrClient::TARGETS[$to]['label'] . " n'est pas configuré."], 400);
 }
 
 // Jeton opaque chiffré scellant la cible (magnet ou .torrent HTTP) réellement
 // proposée par l'app : empêche l'injection d'un torrent arbitraire ET cache la
 // clé API Prowlarr embarquée dans les liens HTTP.
-$token = (string) ($_POST['token'] ?? '');
+$token    = (string) ($_POST['token'] ?? '');
 $category = trim((string) ($_POST['category'] ?? '')) ?: null;
 
 if ($token === '') {
@@ -47,9 +65,10 @@ if ($target === null) {
 if (str_starts_with($target, 'magnet:')) {
     // Magnet (identifiant public) issu d'un jeton de l'app : accepté.
 } elseif (safe_url($target) !== '#') {
-    // .torrent HTTP : c'est qBittorrent qui ira le récupérer. On valide que la
-    // cible n'est pas une IP interne/réservée (anti-SSRF via qBittorrent), sauf
-    // l'hôte Prowlarr de confiance (admin-configuré, souvent en IP privée).
+    // .torrent HTTP : c'est le client (qBittorrent ou l'app *arr) qui ira le
+    // récupérer. On valide que la cible n'est pas une IP interne/réservée
+    // (anti-SSRF par rebond), sauf l'hôte Prowlarr de confiance
+    // (admin-configuré, souvent en IP privée).
     $host = (string) parse_url($target, PHP_URL_HOST);
     $trustedHost = (string) parse_url($config['base_url'], PHP_URL_HOST);
     $allowed = $host !== '' && resolve_to_public_ip($host) !== null;
@@ -63,17 +82,51 @@ if (str_starts_with($target, 'magnet:')) {
     json_response(['error' => 'URL non autorisée.'], 400);
 }
 
-$qbit = new QbittorrentClient(
-    $config['qbit_url'],
-    $config['qbit_user'],
-    $config['qbit_pass'],
-    $config['qbit_timeout'],
-);
+/* ------------------------------------------------------------------ *
+ * qBittorrent
+ * ------------------------------------------------------------------ */
+if ($to === 'qbit') {
+    $qbit = new QbittorrentClient(
+        $config['qbit_url'],
+        $config['qbit_user'],
+        $config['qbit_pass'],
+        $config['qbit_timeout'],
+    );
+
+    try {
+        $qbit->add($target, $category);
+        json_response(['ok' => true, 'message' => 'Envoyé à qBittorrent']);
+    } catch (Throwable $e) {
+        error_log('[indexof] qbit error: ' . $e->getMessage());
+        json_response(['error' => "Échec de l'envoi à qBittorrent."], 502);
+    }
+}
+
+/* ------------------------------------------------------------------ *
+ * Applications *arr
+ *
+ * Le titre, l'indexeur et la date servent au rapprochement côté Sonarr/Radarr.
+ * Ils viennent du client : un utilisateur connecté pourrait les altérer, mais
+ * il ne gagnerait rien qu'il ne puisse déjà faire en cherchant la release
+ * lui-même — l'URL, elle, reste scellée par le serveur.
+ * ------------------------------------------------------------------ */
+$arr = $config['arr'][$to];
+$title = trim((string) ($_POST['title'] ?? ''));
+if ($title === '') {
+    json_response(['error' => 'Titre de release manquant.'], 400);
+}
+
+$client = new ArrClient($arr['url'], $arr['key'], $arr['api'], $config['qbit_timeout']);
 
 try {
-    $qbit->add($target, $category);
-    json_response(['ok' => true]);
+    $message = $client->push(
+        $title,
+        $target,
+        trim((string) ($_POST['indexer'] ?? '')),
+        trim((string) ($_POST['publishDate'] ?? '')),
+    );
+    json_response(['ok' => true, 'message' => $arr['label'] . ' : ' . $message]);
 } catch (Throwable $e) {
-    error_log('[indexof] qbit error: ' . $e->getMessage());
-    json_response(['error' => "Échec de l'envoi à qBittorrent."], 502);
+    error_log('[indexof] ' . $to . ' error: ' . $e->getMessage());
+    json_response(['error' => "Échec de l'envoi à " . $arr['label'] . '.'], 502);
 }
