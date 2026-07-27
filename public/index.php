@@ -101,9 +101,9 @@ $showLogout = auth_enabled($config);
         </div>
 
         <div class="appbar-right">
-            <span id="status" class="status" title="État de la connexion">
+            <button type="button" id="status" class="status" title="Santé des indexeurs — latence, échecs">
                 <span class="status-dot"></span><span class="status-text">…</span>
-            </span>
+            </button>
             <button type="button" id="safe-toggle" class="safe-btn" aria-pressed="true"
                     title="Contenu -18 masqué — cliquer pour l'afficher">🔞</button>
             <label id="qbit-cat-wrap" class="qbit-cat" hidden>

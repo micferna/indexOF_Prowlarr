@@ -77,7 +77,7 @@ const state = {
     results: [], rawResults: [], grouping: true,
     total: 0, capped: false, page: 1, maskOn: false, loading: false,
     qbit: false, qbitCategories: [], qbitCategory: "", arr: {},
-    view: "search", transfersTab: "live", transferFilter: "all", transfers: [], history: [],
+    view: "search", health: [], transfersTab: "live", transferFilter: "all", transfers: [], history: [],
     qbitNames: new Set(), store: false, saved: [],
 };
 
@@ -1126,6 +1126,7 @@ function updateTransfersBadge() {
 
 function setView(view) {
     state.view = view;
+    statusBox.classList.toggle("active", view === "health");
     clearInterval(transfersTimer);
     transfersTimer = null;
     if (view === "transfers") {
@@ -1134,6 +1135,75 @@ function setView(view) {
         renderTransfers();
     }
     updateTransfersBadge();
+}
+
+/* ---------- santé des indexeurs ---------- */
+async function loadHealth() {
+    try {
+        const res = await fetch("api.php?action=health");
+        const data = await res.json();
+        state.health = data.indexers || [];
+    } catch (e) { state.health = []; }
+    if (state.view === "health") renderHealth();
+}
+
+function renderHealth() {
+    hideFacets();
+    observeMore(null);
+
+    if (!state.health.length) {
+        resultsBox.replaceChildren(el("div", { class: "state" },
+            el("span", { class: "emoji", text: "📡" }),
+            "Aucune statistique. Prowlarr les accumule au fil des recherches."));
+        return;
+    }
+
+    const lents = state.health.filter((i) => i.latency >= 1500).length;
+    const meta = el("div", { class: "meta-row" },
+        el("span", {}, el("b", { text: String(state.health.length) }), " indexeurs"),
+        el("span", { class: "meta-actions" }, el("span", { class: "muted",
+            text: lents ? `${lents} au-dessus de 1,5 s — ce sont eux qui font traîner les recherches` : "Tous réactifs" })));
+
+    const head = el("tr", {},
+        el("th", { text: "Indexeur" }),
+        el("th", { class: "num", text: "Latence" }),
+        el("th", { class: "num", text: "Requêtes" }),
+        el("th", { class: "num", text: "Échecs" }),
+        el("th", { class: "num", text: "Grabs" }));
+
+    const rows = state.health.map((i) => {
+        const tr = el("tr");
+        const cell = el("td", { class: "cell-title" });
+        cell.append(el("span", { class: "rel" }, el("span", { class: "rel-name maskable", text: i.name })));
+        if (i.disabled) {
+            cell.append(el("div", { class: "rel-meta" },
+                el("span", { class: "badge-adult", text: "DÉSACTIVÉ PAR PROWLARR" })));
+        }
+        tr.append(cell);
+
+        // La latence est la donnée qui explique un délai dépassé : on la colore.
+        const lat = i.latency >= 1500 ? "s-low" : i.latency >= 700 ? "s-mid" : "s-good";
+        tr.append(el("td", { class: "num" },
+            el("span", { class: "seed " + lat, text: i.latency ? i.latency + " ms" : "—" })));
+        tr.append(el("td", { class: "num" }, String(i.queries)));
+        const ech = el("td", { class: "num" }, String(i.failed));
+        if (i.failed > 0) ech.style.color = "var(--warn)";
+        tr.append(ech);
+        tr.append(el("td", { class: "num" }, String(i.grabs)));
+        return tr;
+    });
+
+    resultsBox.replaceChildren(meta,
+        el("div", { class: "table-wrap" }, el("table", {}, el("thead", {}, head), el("tbody", {}, ...rows))));
+}
+
+if (statusBox) {
+    statusBox.addEventListener("click", () => {
+        if (state.view === "health") { setView("search"); renderResults(); return; }
+        setView("health");
+        loadHealth();
+        renderHealth();
+    });
 }
 
 if (transfersBtn) {

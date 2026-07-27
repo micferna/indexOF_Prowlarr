@@ -247,14 +247,23 @@ body::before {
 
 /* ---------- État de connexion ---------- */
 .status {
+    cursor: pointer;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    background: transparent;
+    font-family: inherit;
+    padding: 5px 8px;
+    transition: border-color 0.15s, background 0.15s;
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    padding: 0 4px 0 0;
     font-size: 12px;
     color: var(--muted);
     white-space: nowrap;
 }
+.status:hover { border-color: var(--line-2); background: var(--surface-2); }
+.status.active { border-color: var(--amber-line); background: var(--amber-soft); color: var(--amber); }
+
 .status-dot {
     width: 6px;
     height: 6px;

@@ -89,6 +89,34 @@ try {
         json_response(['history' => $store->history()]);
     }
 
+    // Santé des indexeurs : latence, volume, échecs, et lesquels sont
+    // actuellement désactivés par le backoff de Prowlarr.
+    if ($action === 'health') {
+        $failing = [];
+        try {
+            $failing = $client->failingIndexers();
+        } catch (Throwable $e) {
+            error_log('[indexof] statut indexeurs indisponible : ' . $e->getMessage());
+        }
+
+        $rows = [];
+        foreach ($client->indexerStats(30) as $st) {
+            $name = (string) ($st['indexerName'] ?? '');
+            $queries = (int) ($st['numberOfQueries'] ?? 0) + (int) ($st['numberOfRssQueries'] ?? 0);
+            $failed  = (int) ($st['numberOfFailedQueries'] ?? 0) + (int) ($st['numberOfFailedRssQueries'] ?? 0);
+            $rows[] = [
+                'name'     => $name,
+                'latency'  => (int) ($st['averageResponseTime'] ?? 0),
+                'queries'  => $queries,
+                'failed'   => $failed,
+                'grabs'    => (int) ($st['numberOfGrabs'] ?? 0),
+                'disabled' => in_array($name, $failing, true),
+            ];
+        }
+        usort($rows, static fn (array $a, array $b): int => $b['latency'] <=> $a['latency']);
+        json_response(['indexers' => $rows]);
+    }
+
     if ($action === 'indexers') {
         json_response(['indexers' => $client->indexers()]);
     }

@@ -78,6 +78,29 @@ final class ProwlarrClient
     }
 
     /**
+     * Statistiques par indexeur sur les N derniers jours : latence moyenne,
+     * volume de requêtes et taux d'échec.
+     *
+     * C'est ce qui permet de comprendre pourquoi une recherche traîne. Un
+     * indexeur à 2 s de latence moyenne quand les autres sont à 200 ms explique
+     * à lui seul des délais dépassés.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function indexerStats(int $days = 30): array
+    {
+        $query = http_build_query([
+            'startDate' => gmdate('Y-m-d\TH:i:s\Z', time() - max(1, $days) * 86400),
+            'endDate'   => gmdate('Y-m-d\TH:i:s\Z'),
+        ]);
+        $data = $this->cached('stats_' . $days, function () use ($query): array {
+            return $this->request('/api/v1/indexerstats?' . $query);
+        });
+        $rows = $data['indexers'] ?? [];
+        return is_array($rows) ? array_values(array_filter($rows, 'is_array')) : [];
+    }
+
+    /**
      * Recherche de releases.
      *
      * @param array<int,int> $indexerIds  IDs d'indexeurs (vide = tous)
