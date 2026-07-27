@@ -1,0 +1,33 @@
+name: Fonctionnalité
+description: Proposer une amélioration
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: besoin
+    attributes:
+      label: Le besoin
+      description: |
+        Décrivez la situation, pas la solution. Qu'est-ce qui est pénible
+        aujourd'hui, et à quelle fréquence ?
+      placeholder: |
+        Quand je cherche une série, je dois relancer la recherche pour chaque
+        saison parce que…
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposition
+    attributes:
+      label: Ce que vous imaginez
+      description: Si vous avez une idée précise de l'interface, décrivez-la.
+
+  - type: checkboxes
+    id: perimetre
+    attributes:
+      label: Périmètre
+      description: |
+        Le projet reste une interface de recherche : pas de gestion de
+        bibliothèque, pas de base de données, aucune dépendance runtime.
+      options:
+        - label: Ma proposition tient dans ce périmètre
+          required: true

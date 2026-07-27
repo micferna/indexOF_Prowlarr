@@ -1,0 +1,71 @@
+name: Bug
+description: Quelque chose ne fonctionne pas comme prévu
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Pour une **faille de sécurité**, n'utilisez pas ce formulaire :
+        voir [SECURITY.md](../blob/main/SECURITY.md).
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Ce qui se passe
+      description: Et ce que vous attendiez à la place.
+      placeholder: |
+        La recherche renvoie « Service momentanément indisponible », alors que
+        le bouton Top fonctionne.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Comment le reproduire
+      placeholder: |
+        1. Se connecter
+        2. Chercher « ... » avec la période « Tout »
+        3. …
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Sortie de `git rev-parse --short HEAD`.
+      placeholder: 25bda13
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation
+      options:
+        - Docker Compose (fourni)
+        - Docker, composition personnalisée
+        - Sans Docker (PHP autonome)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Journaux
+      description: |
+        `docker compose logs --tail=50 php web`. Le message d'erreur détaillé
+        est côté serveur, pas dans le navigateur — l'interface n'affiche qu'un
+        message générique, volontairement.
+
+        Pensez à retirer votre clé API et vos mots de passe.
+      render: text
+
+  - type: textarea
+    id: contexte
+    attributes:
+      label: Contexte
+      description: |
+        Utile si pertinent : nombre d'indexeurs, indexeurs en erreur (le ⚠ dans
+        la barre), reverse-proxy en place, navigateur.

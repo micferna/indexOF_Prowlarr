@@ -5,6 +5,7 @@
 data/
 *.md
 docs/
+LICENSE
 *.log
 .cache/
 vendor/

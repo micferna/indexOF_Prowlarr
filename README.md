@@ -148,3 +148,16 @@ Nécessite PHP 8.1+ avec les extensions cURL, JSON et OpenSSL. Définissez les v
 ```bash
 php -S 0.0.0.0:8080 -t public
 ```
+
+## Contribuer
+
+Les contributions sont bienvenues — lisez [CONTRIBUTING.md](CONTRIBUTING.md)
+avant d'ouvrir une pull request, et [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+pour le ton des échanges.
+
+Une faille de sécurité ne se signale pas dans une issue publique :
+[SECURITY.md](SECURITY.md) explique la marche à suivre.
+
+## Licence
+
+[MIT](LICENSE).

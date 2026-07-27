@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Faille de sécurité
+    url: https://github.com/micferna/indexOF_Prowlarr/security/advisories/new
+    about: Signalement privé — n'ouvrez jamais d'issue publique pour une faille.
+  - name: Question ou aide à l'installation
+    url: https://discord.gg/4P5teKzGUE
+    about: Le Discord est plus rapide qu'une issue pour un problème de configuration.
