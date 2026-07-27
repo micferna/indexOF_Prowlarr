@@ -103,6 +103,8 @@ if ($to === 'qbit') {
             trim((string) ($_POST['title'] ?? '')),
             trim((string) ($_POST['indexer'] ?? '')),
             'qbit',
+            '',
+            current_user(),
         );
         json_response(['ok' => true, 'message' => 'Envoyé à qBittorrent']);
     } catch (Throwable $e) {
@@ -134,7 +136,13 @@ try {
         trim((string) ($_POST['indexer'] ?? '')),
         trim((string) ($_POST['publishDate'] ?? '')),
     );
-    (new Store($config['db_file']))->recordSend($title, trim((string) ($_POST['indexer'] ?? '')), $to);
+    (new Store($config['db_file']))->recordSend(
+        $title,
+        trim((string) ($_POST['indexer'] ?? '')),
+        $to,
+        '',
+        current_user(),
+    );
     json_response(['ok' => true, 'message' => $arr['label'] . ' : ' . $message]);
 } catch (Throwable $e) {
     error_log('[indexof] ' . $to . ' error: ' . $e->getMessage());

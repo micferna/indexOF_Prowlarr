@@ -80,6 +80,8 @@ try {
             // Sans base accessible, les recherches enregistrées et l'historique
             // n'ont pas lieu d'apparaître dans l'interface.
             'store'          => $store->available(),
+            'user'           => current_user(),
+            'admin'          => is_admin($config),
             // Sans webhook, la cloche des recherches n'aurait aucun effet.
             'notify'         => trim((string) (getenv('DISCORD_WEBHOOK') ?: '')) !== '',
         ]);
@@ -145,6 +147,15 @@ try {
         unset($f);
         $summary['sizeHuman'] = format_size($summary['size']);
         json_response($summary);
+    }
+
+    // Comptes : visibles de l'administrateur seul, et sans aucun secret —
+    // la liste ne contient jamais d'empreinte de mot de passe.
+    if ($action === 'users') {
+        if (!is_admin($config)) {
+            json_response(['error' => "Réservé à l'administrateur."], 403);
+        }
+        json_response(['users' => $store->users()]);
     }
 
     if ($action === 'indexers') {

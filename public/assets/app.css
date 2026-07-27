@@ -658,6 +658,8 @@ a.rel:hover { color: var(--amber); }
 .saved-del.on:hover { color: var(--amber); background: var(--amber-soft); }
 
 .saved-add { display: flex; gap: 6px; margin-top: 8px; }
+.users-add { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px 14px; }
+.users-add .saved-input { flex: 1 1 180px; max-width: 260px; }
 .saved-input {
     flex: 1;
     min-width: 0;
@@ -1078,6 +1080,8 @@ body.mask-on .maskable:hover { filter: none; }
 .reveal .ic-eye-off { display: none; }
 .reveal.on .ic-eye { display: none; }
 .reveal.on .ic-eye-off { display: inline; }
+
+.field-user { margin-bottom: 8px; }
 
 .login-error {
     margin-top: 12px;

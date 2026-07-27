@@ -100,7 +100,7 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
 | `PROWLARR_API_KEY` | Clé API Prowlarr | — (obligatoire) |
 | `PROWLARR_BASE_URL` | URL de Prowlarr, sans slash final | — (obligatoire) |
 | `APP_SECRET` | Secret de scellement des liens (≥ 16 car., `openssl rand -hex 32`) | — (obligatoire) |
-| `APP_PASSWORD` | Mot de passe d'accès. Vide = démarrage refusé, sauf `AUTH_DISABLED=1` | — (obligatoire) |
+| `APP_PASSWORD` | Mot de passe partagé et accès administrateur. Vide = démarrage refusé, sauf `AUTH_DISABLED=1` | — (obligatoire) |
 | `AUTH_DISABLED` | `1` pour assumer une app sans authentification | `0` |
 | `RESULT_LIMIT` | Nombre max de résultats par recherche | `200` |
 | `QBITTORRENT_URL` | URL Web UI qBittorrent. Vide = envoi désactivé | _(vide)_ |
@@ -181,9 +181,27 @@ docker compose --profile arr up -d
 - Les trois services partagent `./data/downloads` : c'est ce qui permet aux *arr
   de retrouver les fichiers que qBittorrent a terminés.
 
+## Comptes utilisateurs
+
+Facultatifs. Sans compte créé, rien ne change : tout le monde entre avec
+`APP_PASSWORD`.
+
+Connecté avec `APP_PASSWORD` (sans nom d'utilisateur), vous êtes
+**administrateur** : un bouton apparaît dans la barre pour créer et supprimer
+des comptes nommés. Chaque compte a son propre mot de passe (12 caractères
+minimum, haché) et l'historique retient qui a envoyé quoi.
+
+> **`APP_PASSWORD` reste toujours valable**, même une fois des comptes créés.
+> C'est délibéré : c'est ce qui rend impossible de se verrouiller dehors en
+> supprimant un compte ou en oubliant un mot de passe. En contrepartie, la
+> sécurité de l'ensemble repose sur la force de ce mot de passe.
+
+Un compte nommé ne peut ni créer ni supprimer de compte : sans cette limite,
+n'importe quel utilisateur pourrait s'octroyer un accès ou évincer les autres.
+
 ## Sécurité
 
-- **Authentification obligatoire** : `APP_PASSWORD` (session + CSRF). Sans lui, l'app refuse de démarrer, à moins de poser explicitement `AUTH_DISABLED=1`.
+- **Authentification obligatoire** : `APP_PASSWORD` (session + CSRF). Sans lui, l'app refuse de démarrer, à moins de poser explicitement `AUTH_DISABLED=1`. Comptes nommés en option, mots de passe hachés, gestion réservée à l'administrateur.
 - **Liens de téléchargement scellés** : les URLs Prowlarr (qui contiennent la clé API) ne sont jamais envoyées au navigateur. Le client reçoit un jeton chiffré (AES-256-GCM) à durée de vie limitée, que seul le serveur peut ouvrir.
 - **Proxy `.torrent` anti-SSRF** : schémas `http(s)` uniquement, rejet des IP privées/réservées, épinglage de l'IP validée (anti-DNS-rebinding), re-validation à chaque redirection, plafond de taille et timeouts.
 - **Anti-brute-force** : `limit_req` nginx sur les POST de login + verrouillage applicatif (10 échecs / 15 min par IP).

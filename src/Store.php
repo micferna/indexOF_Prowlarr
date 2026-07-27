@@ -68,10 +68,21 @@ final class Store
                 indexer    TEXT NOT NULL DEFAULT "",
                 target     TEXT NOT NULL DEFAULT "qbit",
                 hash       TEXT NOT NULL DEFAULT "",
+                user       TEXT NOT NULL DEFAULT "",
                 created_at INTEGER NOT NULL
             )'
         );
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_sends_key ON sends (title_key)');
+
+        // Bases créées avant les comptes : on complète sans les recréer.
+        $scols = [];
+        $sinfo = $pdo->query('PRAGMA table_info(sends)');
+        foreach ($sinfo === false ? [] : $sinfo->fetchAll() as $c) {
+            $scols[] = (string) ($c['name'] ?? '');
+        }
+        if (!in_array('user', $scols, true)) {
+            $pdo->exec('ALTER TABLE sends ADD COLUMN user TEXT NOT NULL DEFAULT ""');
+        }
         $pdo->exec(
             'CREATE TABLE IF NOT EXISTS searches (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,6 +112,19 @@ final class Store
         }
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_searches_token ON searches (token)');
 
+        // Comptes nommés. Facultatifs : APP_PASSWORD reste toujours valable et
+        // donne l'accès administrateur — c'est ce qui rend impossible de se
+        // verrouiller dehors en créant ou supprimant des comptes.
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS users (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL UNIQUE,
+                pass_hash  TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                last_login INTEGER NOT NULL DEFAULT 0
+            )'
+        );
+
         // Releases déjà signalées, pour ne notifier que la nouveauté.
         $pdo->exec(
             'CREATE TABLE IF NOT EXISTS seen (
@@ -118,7 +142,7 @@ final class Store
         return (string) preg_replace('/[^a-z0-9]/', '', strtolower($title));
     }
 
-    public function recordSend(string $title, string $indexer, string $target, string $hash = ''): void
+    public function recordSend(string $title, string $indexer, string $target, string $hash = '', string $user = ''): void
     {
         $pdo = $this->db();
         if ($pdo === null || $title === '') {
@@ -126,10 +150,10 @@ final class Store
         }
         try {
             $stmt = $pdo->prepare(
-                'INSERT INTO sends (title, title_key, indexer, target, hash, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?)'
+                'INSERT INTO sends (title, title_key, indexer, target, hash, user, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)'
             );
-            $stmt->execute([$title, self::titleKey($title), $indexer, $target, $hash, time()]);
+            $stmt->execute([$title, self::titleKey($title), $indexer, $target, $hash, $user, time()]);
         } catch (Throwable $e) {
             error_log('[indexof] écriture impossible : ' . $e->getMessage());
         }
@@ -181,7 +205,7 @@ final class Store
         }
         try {
             $stmt = $pdo->query(
-                'SELECT id, title, indexer, target, hash, created_at
+                'SELECT id, title, indexer, target, hash, user, created_at
                  FROM sends ORDER BY created_at DESC, id DESC LIMIT ' . max(1, $limit)
             );
             return $stmt === false ? [] : $stmt->fetchAll();
@@ -338,6 +362,111 @@ final class Store
     public function notifiedSearches(): array
     {
         return array_values(array_filter($this->searches(), static fn (array $s): bool => (int) $s['notify'] === 1));
+    }
+
+    /* ------------------------------------------------------------------ *
+     * Comptes nommés
+     * ------------------------------------------------------------------ */
+
+    /** Nom d'utilisateur acceptable : lisible, sans ambiguïté, borné. */
+    public static function validName(string $name): bool
+    {
+        return preg_match('/^[a-zA-Z0-9._-]{2,32}$/', $name) === 1;
+    }
+
+    /** @return array<int,array{id:int,name:string,created_at:int,last_login:int}> */
+    public function users(): array
+    {
+        $pdo = $this->db();
+        if ($pdo === null) {
+            return [];
+        }
+        try {
+            $stmt = $pdo->query('SELECT id, name, created_at, last_login FROM users ORDER BY name COLLATE NOCASE');
+            $rows = $stmt === false ? [] : $stmt->fetchAll();
+        } catch (Throwable $e) {
+            return [];
+        }
+        return array_map(static fn (array $r): array => [
+            'id'         => (int) $r['id'],
+            'name'       => (string) $r['name'],
+            'created_at' => (int) $r['created_at'],
+            'last_login' => (int) $r['last_login'],
+        ], $rows);
+    }
+
+    public function userCount(): int
+    {
+        return count($this->users());
+    }
+
+    /**
+     * Crée un compte. Renvoie un message d'erreur, ou null en cas de succès.
+     */
+    public function addUser(string $name, string $password): ?string
+    {
+        $pdo = $this->db();
+        if ($pdo === null) {
+            return 'Base indisponible.';
+        }
+        if (!self::validName($name)) {
+            return 'Nom invalide (2 à 32 caractères : lettres, chiffres, . _ -).';
+        }
+        if (strlen($password) < 12) {
+            return 'Mot de passe trop court (12 caractères minimum).';
+        }
+        try {
+            $stmt = $pdo->prepare('INSERT INTO users (name, pass_hash, created_at) VALUES (?, ?, ?)');
+            $stmt->execute([$name, password_hash($password, PASSWORD_DEFAULT), time()]);
+            return null;
+        } catch (Throwable $e) {
+            return 'Ce nom est déjà pris.';
+        }
+    }
+
+    public function deleteUser(int $id): void
+    {
+        $pdo = $this->db();
+        if ($pdo === null) {
+            return;
+        }
+        try {
+            $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$id]);
+        } catch (Throwable $e) {
+            error_log('[indexof] suppression de compte impossible : ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Vérifie un couple nom/mot de passe. Renvoie le nom exact en cas de succès.
+     *
+     * Le hachage est calculé même quand le compte n'existe pas : sans ça, le
+     * temps de réponse dirait à un attaquant quels noms existent.
+     */
+    public function checkUser(string $name, string $password): ?string
+    {
+        $pdo = $this->db();
+        if ($pdo === null || $password === '') {
+            return null;
+        }
+        $factice = '$2y$10$usqI7Xf2Vp4Wlm0Hn8kQdurL3iZ5vJ2cGm1yTqQe7Rn0aPz9sXwCu';
+        try {
+            $stmt = $pdo->prepare('SELECT name, pass_hash FROM users WHERE name = ? COLLATE NOCASE LIMIT 1');
+            $stmt->execute([$name]);
+            $row = $stmt->fetch();
+        } catch (Throwable $e) {
+            return null;
+        }
+        $hash = is_array($row) ? (string) $row['pass_hash'] : $factice;
+        if (!password_verify($password, $hash) || !is_array($row)) {
+            return null;
+        }
+        try {
+            $pdo->prepare('UPDATE users SET last_login = ? WHERE name = ?')->execute([time(), $row['name']]);
+        } catch (Throwable $e) {
+            // Sans conséquence : la connexion est déjà validée.
+        }
+        return (string) $row['name'];
     }
 
     public function deleteSearch(int $id): void

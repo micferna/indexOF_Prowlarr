@@ -114,7 +114,9 @@ $showLogout = auth_enabled($config);
                 <select id="qbit-cat" aria-label="Catégorie qBittorrent"></select>
             </label>
             <?php if ($showLogout): ?>
-                <a href="logout.php?csrf=<?php echo e($csrf); ?>" class="logout">Déconnexion</a>
+                <button type="button" id="account-btn" class="btn-top" hidden
+                        title="Comptes utilisateurs"><span id="account-name"></span></button>
+                <a href="logout.php?csrf=<?php echo e($csrf); ?>" class="logout" title="Déconnexion">Déconnexion</a>
             <?php endif; ?>
         </div>
     </header>

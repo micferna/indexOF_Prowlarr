@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../src/config.php';
 require_once __DIR__ . '/../src/functions.php';
 require_once __DIR__ . '/../src/auth.php';
+require_once __DIR__ . '/../src/Store.php';
 
 $config = load_config();
 start_session();
@@ -25,17 +26,21 @@ $ipKey = 'login_' . client_ip();
 $blocked = throttle_failures($cacheDir, $ipKey, 900) >= 10
         || throttle_failures($cacheDir, 'login_global', 900) >= 100;
 
+// Le champ « utilisateur » n'apparaît que si des comptes existent : inutile de
+// demander un nom là où il n'y en a pas.
+$store = new Store($config['db_file']);
+$hasUsers = $store->userCount() > 0;
+
 $error = null;
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+    $user = attempt_login($config, $store, (string) ($_POST['user'] ?? ''), (string) ($_POST['password'] ?? ''));
     if ($blocked) {
         $error = 'Trop de tentatives. Réessayez dans quelques minutes.';
     } elseif (!verify_csrf($_POST['csrf'] ?? null)) {
         $error = 'Session expirée, réessayez.';
-    } elseif (check_password($config, (string) ($_POST['password'] ?? ''))) {
+    } elseif ($user !== null) {
         throttle_reset($cacheDir, $ipKey);
-        session_regenerate_id(true);
-        unset($_SESSION['csrf']); // nouveau jeton CSRF après élévation de privilège
-        $_SESSION['auth'] = true;
+        open_session($user);
         header('Location: index.php');
         exit;
     } else {
@@ -66,10 +71,18 @@ $token = csrf_token();
 
             <input type="hidden" name="csrf" value="<?php echo e($token); ?>">
 
+            <?php if ($hasUsers): ?>
+            <div class="field field-user">
+                <svg class="field-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+                <input id="user" type="text" name="user" placeholder="Utilisateur (vide = administrateur)"
+                       autocomplete="username" maxlength="32" class="field-input">
+            </div>
+            <?php endif; ?>
+
             <div class="field">
                 <svg class="field-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
                 <input id="pw" type="password" name="password" placeholder="Mot de passe"
-                       autocomplete="current-password" autofocus required class="field-input">
+                       autocomplete="current-password"<?php echo $hasUsers ? '' : ' autofocus'; ?> required class="field-input">
                 <button type="button" id="reveal" class="reveal" aria-label="Afficher le mot de passe">
                     <svg class="ic-eye" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
                     <svg class="ic-eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 10.6a3 3 0 0 0 4.2 4.2M9.9 5.1A10.9 10.9 0 0 1 12 5c7 0 11 7 11 7a18.5 18.5 0 0 1-3.2 4M6.6 6.6A18.6 18.6 0 0 0 1 12s4 7 11 7a10.9 10.9 0 0 0 3.4-.5"/></svg>

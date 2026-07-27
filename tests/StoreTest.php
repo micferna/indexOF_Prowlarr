@@ -168,6 +168,69 @@ final class StoreTest extends TestCase
         $this->assertSame([], $store->notifiedSearches());
     }
 
+    public function testUserLifecycleAndPasswordCheck(): void
+    {
+        $store = new Store($this->file);
+        $this->assertSame(0, $store->userCount());
+
+        $this->assertNull($store->addUser('alice', 'motdepasse-tres-long'));
+        $this->assertSame(1, $store->userCount());
+
+        $this->assertSame('alice', $store->checkUser('alice', 'motdepasse-tres-long'));
+        $this->assertNull($store->checkUser('alice', 'mauvais'), 'mauvais mot de passe');
+        $this->assertNull($store->checkUser('inconnu', 'motdepasse-tres-long'), 'compte inexistant');
+        $this->assertNull($store->checkUser('alice', ''), 'mot de passe vide');
+
+        // Le nom n'est pas sensible à la casse : « Alice » et « alice » sont
+        // la même personne, sinon on créerait deux comptes homographes.
+        $this->assertSame('alice', $store->checkUser('ALICE', 'motdepasse-tres-long'));
+
+        $id = $store->users()[0]['id'];
+        $store->deleteUser($id);
+        $this->assertSame(0, $store->userCount());
+        $this->assertNull($store->checkUser('alice', 'motdepasse-tres-long'));
+    }
+
+    public function testUserCreationRules(): void
+    {
+        $store = new Store($this->file);
+
+        $this->assertNotNull($store->addUser('a', 'motdepasse-tres-long'), 'nom trop court');
+        $this->assertNotNull($store->addUser('a b', 'motdepasse-tres-long'), 'espace interdit');
+        $this->assertNotNull($store->addUser('../etc', 'motdepasse-tres-long'), 'caractères interdits');
+        $this->assertNotNull($store->addUser('bob', 'court'), 'mot de passe trop court');
+
+        $this->assertNull($store->addUser('bob', 'motdepasse-tres-long'));
+        $this->assertNotNull($store->addUser('bob', 'motdepasse-tres-long'), 'nom déjà pris');
+        $this->assertSame(1, $store->userCount());
+    }
+
+    public function testPasswordIsHashedNotStored(): void
+    {
+        $store = new Store($this->file);
+        $store->addUser('alice', 'motdepasse-tres-long');
+
+        // La liste exposée à l'interface ne doit contenir aucune empreinte.
+        $this->assertArrayNotHasKey('pass_hash', $store->users()[0]);
+
+        // Et le fichier ne contient pas le mot de passe en clair.
+        $this->assertStringNotContainsString(
+            'motdepasse-tres-long',
+            (string) file_get_contents($this->file)
+        );
+    }
+
+    public function testSendIsAttributedToItsAuthor(): void
+    {
+        $store = new Store($this->file);
+        $store->recordSend('Release.A', 'Tracker', 'qbit', '', 'alice');
+        $store->recordSend('Release.B', 'Tracker', 'qbit');
+
+        $history = $store->history();
+        $this->assertSame('', $history[0]['user'], 'sans compte nommé, pas d\'auteur');
+        $this->assertSame('alice', $history[1]['user']);
+    }
+
     public function testUnavailableStoreDegradesInsteadOfThrowing(): void
     {
         // Chemin impossible à créer : l'application doit continuer de tourner.
@@ -184,6 +247,11 @@ final class StoreTest extends TestCase
         $this->assertNull($store->searchByToken(str_repeat('a', 32)));
         $this->assertFalse($store->feedTokenExists(str_repeat('a', 32)));
         $this->assertSame([], $store->takeUnseen(1, ['a']));
+        $this->assertSame([], $store->users());
+        $this->assertSame(0, $store->userCount());
+        $this->assertNotNull($store->addUser('alice', 'motdepasse-tres-long'));
+        $this->assertNull($store->checkUser('alice', 'motdepasse-tres-long'));
+        $store->deleteUser(1);
         $this->assertSame([], $store->notifiedSearches());
         $store->setNotify(1, true);
         // Ne doit lever aucune exception.

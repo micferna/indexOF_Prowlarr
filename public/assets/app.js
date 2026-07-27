@@ -80,6 +80,7 @@ const state = {
     qbit: false, qbitCategories: [], qbitCategory: "", arr: {},
     view: "search", health: [], transfersTab: "live", transferFilter: "all", transfers: [], history: [],
     qbitNames: new Set(), store: false, notify: false, saved: [],
+    user: "", admin: false, users: [],
 };
 
 const $ = (s) => document.querySelector(s);
@@ -93,6 +94,8 @@ const maskBtn = $("#mask-toggle");
 const groupBtn = $("#group-toggle");
 const topBtn = $("#top-btn");
 const transfersBtn = $("#transfers-btn");
+const accountBtn = $("#account-btn");
+const accountName = $("#account-name");
 const transfersCount = $("#transfers-count");
 const safeBtn = $("#safe-toggle");
 const filtersBtn = $("#filters-btn");
@@ -971,6 +974,9 @@ async function loadStatus() {
         state.arr = s.arr || {};
         state.store = !!s.store;
         state.notify = !!s.notify;
+        state.user = s.user || "";
+        state.admin = !!s.admin;
+        renderAccountButton();
         if (state.qbit) loadTransfers();
         if (state.store) loadSaved();
         renderQbitCategories();
@@ -1167,6 +1173,7 @@ function updateTransfersBadge() {
 function setView(view) {
     state.view = view;
     statusBox.classList.toggle("active", view === "health");
+    renderAccountButton();
     clearInterval(transfersTimer);
     transfersTimer = null;
     if (view === "transfers") {
@@ -1175,6 +1182,108 @@ function setView(view) {
         renderTransfers();
     }
     updateTransfersBadge();
+}
+
+/* ==================================================================
+   Comptes
+
+   APP_PASSWORD reste toujours valable et donne l'accès administrateur :
+   c'est ce qui rend impossible de se verrouiller dehors. Les comptes
+   nommés s'ajoutent, ils ne remplacent rien.
+   ================================================================== */
+function renderAccountButton() {
+    if (!accountBtn || !accountName) return;
+    // Sans base, aucun compte ne peut exister : le bouton n'aurait rien à ouvrir.
+    accountBtn.hidden = !(state.admin && state.store);
+    accountName.textContent = state.user || "admin";
+    accountBtn.classList.toggle("has-sel", state.view === "users");
+}
+
+async function loadUsers() {
+    try {
+        const res = await fetch("api.php?action=users");
+        const data = await res.json();
+        state.users = data.users || [];
+    } catch (e) { state.users = []; }
+    if (state.view === "users") renderUsers();
+}
+
+function renderUsers() {
+    hideFacets();
+    observeMore(null);
+
+    const meta = el("div", { class: "meta-row" },
+        el("span", {}, el("b", { text: String(state.users.length) }),
+            ` compte${state.users.length > 1 ? "s" : ""} nommé${state.users.length > 1 ? "s" : ""}`),
+        el("span", { class: "meta-actions" },
+            el("span", { class: "muted", text: "Le mot de passe partagé reste l'accès administrateur" })));
+
+    // Création : un nom, un mot de passe. Le serveur refuse en dessous de
+    // 12 caractères — inutile de créer un compte plus faible que la porte.
+    const nom = el("input", { type: "text", class: "saved-input", maxlength: "32",
+        placeholder: "Nom d'utilisateur", "aria-label": "Nom d'utilisateur" });
+    const mdp = el("input", { type: "password", class: "saved-input",
+        placeholder: "Mot de passe (12 caractères minimum)", "aria-label": "Mot de passe" });
+    const creer = el("button", { type: "button", class: "del-choice", text: "Créer le compte" });
+    const creation = async () => {
+        const { ok, data } = await postForm("users.php",
+            { op: "add", name: nom.value.trim(), password: mdp.value });
+        toast(ok ? data.message : (data.error || "Échec"));
+        if (ok) { nom.value = ""; mdp.value = ""; loadUsers(); }
+    };
+    creer.addEventListener("click", creation);
+    mdp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); creation(); } });
+    const form = el("div", { class: "users-add" }, nom, mdp, creer);
+
+    if (!state.users.length) {
+        resultsBox.replaceChildren(meta, form, el("div", { class: "state" },
+            el("span", { class: "emoji", text: "👤" }),
+            "Aucun compte nommé. Tout le monde entre avec le mot de passe partagé."));
+        return;
+    }
+
+    const rows = state.users.map((u) => {
+        const tr = el("tr");
+        const cell = el("td", { class: "cell-title" });
+        cell.append(el("span", { class: "rel" }, el("span", { class: "rel-name", text: u.name })));
+        cell.append(el("div", { class: "rel-meta" }, el("span", {
+            text: u.last_login
+                ? "dernière connexion le " + new Date(u.last_login * 1000).toLocaleDateString("fr-FR")
+                : "jamais connecté",
+        })));
+        tr.append(cell);
+        tr.append(el("td", { class: "num" },
+            new Date(u.created_at * 1000).toLocaleDateString("fr-FR")));
+
+        const actions = el("div", { class: "actions" });
+        const suppr = makeBtn("act act-del", ICONS.trash, "Supprimer ce compte", async (btn) => {
+            btn.disabled = true;
+            const { ok, data } = await postForm("users.php", { op: "delete", id: u.id });
+            toast(ok ? data.message : (data.error || "Échec"));
+            loadUsers();
+        });
+        actions.append(suppr);
+        tr.append(el("td", { class: "num" }, actions));
+        return tr;
+    });
+
+    const table = el("table", {},
+        el("thead", {}, el("tr", {},
+            el("th", { text: "Compte" }),
+            el("th", { class: "num", text: "Créé le" }),
+            el("th", { class: "num", text: "" }))),
+        el("tbody", {}, ...rows));
+
+    resultsBox.replaceChildren(meta, form, el("div", { class: "table-wrap" }, table));
+}
+
+if (accountBtn) {
+    accountBtn.addEventListener("click", () => {
+        if (state.view === "users") { setView("search"); renderResults(); return; }
+        setView("users");
+        loadUsers();
+        renderUsers();
+    });
 }
 
 /* ---------- santé des indexeurs ---------- */
@@ -1308,6 +1417,9 @@ function renderSendHistory() {
             el("span", { class: "idx-tag maskable", text: h.indexer || "—" }),
             el("span", { class: "sep", text: "·" }),
             el("span", { text: h.target === "qbit" ? "qBittorrent" : h.target }));
+        if (h.user) {
+            meta2.append(el("span", { class: "sep", text: "·" }), el("span", { text: h.user }));
+        }
         cell.append(meta2);
         tr.append(cell);
         tr.append(el("td", { class: "num" },

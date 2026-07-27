@@ -3,10 +3,19 @@
 declare(strict_types=1);
 
 /**
- * Authentification minimale (mot de passe unique) + protection CSRF.
+ * Authentification + protection CSRF.
  *
- * L'auth est active uniquement si APP_PASSWORD est défini. Le jeton CSRF est
- * toujours émis : il protège les endpoints d'écriture (envoi qBittorrent).
+ * Deux façons d'entrer :
+ *  - APP_PASSWORD seul, sans nom d'utilisateur. Toujours valable, et donne
+ *    l'accès administrateur (gestion des comptes).
+ *  - un compte nommé, si des comptes existent.
+ *
+ * APP_PASSWORD reste accepté même quand des comptes existent, et c'est
+ * délibéré : c'est ce qui rend impossible de se verrouiller dehors en
+ * supprimant un compte ou en oubliant un mot de passe. Sa force est donc ce qui
+ * protège l'ensemble.
+ *
+ * Le jeton CSRF est toujours émis : il protège les endpoints d'écriture.
  */
 
 /** Démarre la session avec des paramètres de cookie durcis. */
@@ -65,6 +74,50 @@ function is_authenticated(array $config): bool
 function check_password(array $config, string $candidate): bool
 {
     return hash_equals((string) $config['password'], $candidate);
+}
+
+/**
+ * Tente une connexion. Renvoie le nom du compte, '' pour l'administrateur
+ * (mot de passe partagé), ou null en cas d'échec.
+ *
+ * @param array<string,mixed> $config
+ */
+function attempt_login(array $config, ?Store $store, string $name, string $password): ?string
+{
+    // Sans nom : c'est le mot de passe partagé, donc l'administrateur.
+    if (trim($name) === '') {
+        return check_password($config, $password) ? '' : null;
+    }
+    // Avec un nom : un compte nommé, s'il en existe.
+    return $store !== null ? $store->checkUser(trim($name), $password) : null;
+}
+
+/** Ouvre la session pour un utilisateur donné ('' = administrateur). */
+function open_session(string $user): void
+{
+    session_regenerate_id(true);
+    unset($_SESSION['csrf']); // nouveau jeton après élévation de privilège
+    $_SESSION['auth']  = true;
+    $_SESSION['user']  = $user;
+    $_SESSION['admin'] = $user === '';
+}
+
+/** Nom de l'utilisateur connecté ('' pour l'administrateur). */
+function current_user(): string
+{
+    return (string) ($_SESSION['user'] ?? '');
+}
+
+/**
+ * L'administrateur est celui qui s'est connecté avec le mot de passe partagé.
+ * Lui seul gère les comptes : un compte nommé ne peut ni en créer ni en
+ * supprimer, et ne peut donc pas s'arroger l'accès.
+ *
+ * @param array<string,mixed> $config
+ */
+function is_admin(array $config): bool
+{
+    return !auth_enabled($config) || ($_SESSION['admin'] ?? false) === true;
 }
 
 /** Jeton CSRF de la session (créé si absent). */
