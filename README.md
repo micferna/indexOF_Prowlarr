@@ -85,6 +85,9 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
   les fichiers, en deux temps, sans boîte de dialogue). Filtres d'état et actions
   groupées pour quand la liste s'allonge. Rafraîchi toutes les 3 s, uniquement
   quand la vue est ouverte.
+- **Utilisable au téléphone** : sous 640 px le tableau devient une liste de cartes —
+  titre sur toute la largeur, chiffres et actions en dessous. Aucun défilement
+  horizontal, cibles tactiles élargies.
 - **Installable sur téléphone** (PWA) : icône, plein écran, cache des seuls fichiers
   statiques — jamais les pages ni l'API, qui dépendent de la session.
 - **Masquage des noms d'indexeurs** en un bouton, persisté localement ; le survol révèle.

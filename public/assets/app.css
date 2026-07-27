@@ -96,6 +96,7 @@ body::before {
     z-index: 30;
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 10px;
     padding: 9px 18px;
     background: rgba(9, 13, 18, 0.88);
@@ -521,8 +522,7 @@ table {
 }
 
 thead th {
-    position: sticky;
-    top: 49px;
+    position: static;
     z-index: 10;
     padding: 9px 12px;
     background: var(--bg);
@@ -1120,32 +1120,92 @@ body.mask-on .maskable:hover { filter: none; }
    Adaptations
    ========================================================================== */
 @media (max-width: 900px) {
-    .appbar { flex-wrap: wrap; padding: 9px 12px; }
+    .appbar { padding: 9px 12px; }
     .command-bar { order: 3; flex-basis: 100%; max-width: none; }
     .appbar-right { order: 2; }
     .results, .top-banner { padding-left: 12px; padding-right: 12px; }
-    /* La barre passe sur deux niveaux : sa hauteur n'est plus constante, un
-       en-tête collant viendrait recouvrir les lignes. */
-    thead th { position: static; }
     .btn-top-label, .filters-lbl { display: none; }
     .rel-meta { white-space: normal; }
+    .table-wrap { overflow-x: auto; }
+    table { min-width: 560px; }
 }
 
-@media (max-width: 620px) {
-    .table-wrap { overflow-x: auto; }
-    table { min-width: 620px; }
+/* ==========================================================================
+   Mobile — le tableau devient une liste de cartes
+   ==========================================================================
+   Un tableau à cinq colonnes ne tient pas sur un téléphone : le forcer à
+   620 px de large obligeait à faire défiler la page latéralement pour lire une
+   taille. Chaque ligne devient donc un bloc : le titre sur toute la largeur,
+   puis les chiffres et les actions en dessous. Aucun défilement horizontal.
+   ========================================================================== */
+@media (max-width: 640px) {
     .btn-label { display: none; }
     .btn-primary::after { content: "⌕"; }
+
+    /* Rien ne doit dépasser en largeur, barre comprise. */
+    .appbar { padding: 8px 10px; gap: 8px; }
+    .appbar-right { flex-wrap: wrap; gap: 6px; }
+    /* « Déconnexion » prenait une ligne entière pour un usage rare. */
+    .logout { font-size: 0; padding: 7px 9px; }
+    .logout::after { content: "⏻"; font-size: 14px; }
+    .results, .top-banner { padding-left: 10px; padding-right: 10px; }
+    .qbit-cat { display: none; }        /* réglage de niche, place trop rare */
+    .table-wrap { overflow-x: visible; }
+
+    /* La règle des 900 px impose une largeur minimale au tableau : elle doit
+       sauter ici, sinon elle continue de forcer le défilement horizontal. */
+    table, tbody, tr, td { display: block; width: auto; min-width: 0; }
+    thead { display: none; }            /* sans colonnes, les en-têtes n'ont plus de sens */
+
+    tbody tr {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 14px;
+        padding: 11px 12px;
+        border-left: 3px solid transparent;
+    }
+    /* Le liseré de qualité passe sur la ligne. La règle du bureau
+       (tr.q-uhd .cell-title) est plus spécifique : il faut l'égaler pour
+       neutraliser l'ombre interne, sinon le liseré apparaît en double. */
+    tbody tr .cell-title,
+    tbody tr.q-uhd .cell-title,
+    tbody tr.q-hd .cell-title { box-shadow: none; }
+    tr.q-uhd { border-left-color: var(--amber); }
+    tr.q-hd { border-left-color: rgba(240, 166, 60, 0.45); }
+
+    .cell-title {
+        flex: 1 1 100%;
+        max-width: none;
+        padding: 0;
+    }
+    /* Sur deux lignes plutôt que tronqué : l'écran est étroit, pas le nom. */
+    .rel { white-space: normal; }
+    .rel-name { font-size: 13.5px; }
+
+    td.num {
+        flex: 0 0 auto;
+        padding: 0;
+        text-align: left;
+    }
+    td.num:last-child { margin-left: auto; }
+    .actions { justify-content: flex-end; }
+    .act { width: 32px; height: 32px; }  /* cible tactile confortable */
+
+    .src-row > td, .files-row > td { padding: 0 0 10px 10px; }
+    .meta-row { font-size: 12px; }
+    .tr-controls { padding-bottom: 10px; }
+    .tr-bulk { margin-left: 0; }
 
     /* Ancré à la barre, le panneau sortait de l'écran : on le pose en plein
        cadre sous l'en-tête. */
     .filters-panel {
         position: fixed;
-        top: 104px;
-        left: 8px;
-        right: 8px;
+        top: 96px;
+        left: 6px;
+        right: 6px;
         width: auto;
-        max-height: calc(100vh - 120px);
+        max-height: calc(100vh - 110px);
     }
 }
 

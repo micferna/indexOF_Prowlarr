@@ -850,7 +850,9 @@ function renderRow(r) {
     if (r.leechers) seedCell.append(el("span", { class: "leech", text: " /" + r.leechers }));
     tr.append(seedCell);
 
-    const age = r.daysOld == null ? "—" : (r.daysOld === 0 ? "auj." : r.daysOld + " j");
+    // Certains trackers publient une date dans le futur : un âge négatif
+    // n'apprend rien, on l'affiche comme du jour même.
+    const age = r.daysOld == null ? "—" : (r.daysOld <= 0 ? "auj." : r.daysOld + " j");
     const ageCell = el("td", { class: "num" }, age);
     ageCell.title = r.publishDate || "";
     tr.append(ageCell);
