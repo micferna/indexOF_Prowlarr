@@ -49,6 +49,16 @@ if ($op === 'delete') {
     json_response(['ok' => true, 'message' => 'Recherche supprimée']);
 }
 
+if ($op === 'notify') {
+    $id = (int) ($_POST['id'] ?? 0);
+    if ($id <= 0) {
+        json_response(['error' => 'Recherche invalide.'], 400);
+    }
+    $on = ((string) ($_POST['on'] ?? '0')) === '1';
+    $store->setNotify($id, $on);
+    json_response(['ok' => true, 'message' => $on ? 'Notifications activées' : 'Notifications coupées']);
+}
+
 if ($op === 'clear-history') {
     $store->clearHistory();
     json_response(['ok' => true, 'message' => 'Historique vidé']);

@@ -111,6 +111,40 @@ services:
       - no-new-privileges:true
 
   # ------------------------------------------------------------------
+  # Notifications Discord des recherches enregistrées — optionnel.
+  #   docker compose --profile notify up -d
+  # Renseignez DISCORD_WEBHOOK dans .env et activez la cloche sur les
+  # recherches à surveiller. Sans webhook, le service ne fait rien.
+  # ------------------------------------------------------------------
+  notifier:
+    image: indexof-prowlarr-php:latest
+    container_name: indexof_notifier
+    profiles: ["notify"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CACHE_DIR: /tmp/indexof_cache
+    # Une boucle plutôt qu'un démon cron : un processus, des journaux qui
+    # arrivent dans `docker compose logs`, rien de plus à installer.
+    entrypoint: ["sh", "-c"]
+    command:
+      - 'while true; do php /var/www/html/bin/notify.php; sleep "${NOTIFY_INTERVAL:-900}"; done'
+    depends_on:
+      - prowlarr
+    networks:
+      - indexof
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - php-data:/var/lib/indexof
+
+  # ------------------------------------------------------------------
   # Applications *arr — optionnelles, derrière un profil : rien ne démarre
   # sans `docker compose --profile arr up -d`.
   #

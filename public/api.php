@@ -80,6 +80,8 @@ try {
             // Sans base accessible, les recherches enregistrées et l'historique
             // n'ont pas lieu d'apparaître dans l'interface.
             'store'          => $store->available(),
+            // Sans webhook, la cloche des recherches n'aurait aucun effet.
+            'notify'         => trim((string) (getenv('DISCORD_WEBHOOK') ?: '')) !== '',
         ]);
     }
 

@@ -30,12 +30,13 @@ RUN set -eux; \
 WORKDIR /var/www/html
 COPY src/ ./src/
 COPY public/ ./public/
+COPY bin/ ./bin/
 
 # COPY conserve les permissions de l'hôte : un umask restrictif (fichiers en
 # 0660) produisait une image dont php-fpm, qui tourne en www-data, ne pouvait
 # pas lire le code. On fige des droits lisibles, indépendants de la machine
 # de build (lecture seule : rien n'est inscriptible).
-RUN chmod -R a=rX,u+w /var/www/html/src /var/www/html/public
+RUN chmod -R a=rX,u+w /var/www/html/src /var/www/html/public /var/www/html/bin
 
 RUN mkdir -p /tmp/indexof_cache /var/lib/php/sessions /var/lib/indexof \
     && chown -R www-data:www-data /tmp/indexof_cache /var/lib/php/sessions /var/lib/indexof \

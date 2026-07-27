@@ -82,6 +82,7 @@ final class Store
                 trackers   TEXT NOT NULL DEFAULT "",
                 safe       INTEGER NOT NULL DEFAULT 1,
                 token      TEXT NOT NULL DEFAULT "",
+                notify     INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
             )'
         );
@@ -95,7 +96,20 @@ final class Store
         if (!in_array('token', $cols, true)) {
             $pdo->exec('ALTER TABLE searches ADD COLUMN token TEXT NOT NULL DEFAULT ""');
         }
+        if (!in_array('notify', $cols, true)) {
+            $pdo->exec('ALTER TABLE searches ADD COLUMN notify INTEGER NOT NULL DEFAULT 0');
+        }
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_searches_token ON searches (token)');
+
+        // Releases déjà signalées, pour ne notifier que la nouveauté.
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS seen (
+                search_id  INTEGER NOT NULL,
+                guid       TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (search_id, guid)
+            )'
+        );
     }
 
     /** Clé de rapprochement : le titre débarrassé de sa ponctuation et de sa casse. */
@@ -225,7 +239,7 @@ final class Store
         }
         try {
             $stmt = $pdo->query(
-                'SELECT id, name, query, days, cats, trackers, safe, token, created_at
+                'SELECT id, name, query, days, cats, trackers, safe, token, notify, created_at
                  FROM searches ORDER BY name COLLATE NOCASE'
             );
             return $stmt === false ? [] : $stmt->fetchAll();
@@ -264,6 +278,68 @@ final class Store
         return $this->searchByToken($token) !== null;
     }
 
+    /** Active ou coupe la notification d'une recherche. */
+    public function setNotify(int $id, bool $on): void
+    {
+        $pdo = $this->db();
+        if ($pdo === null) {
+            return;
+        }
+        try {
+            $pdo->prepare('UPDATE searches SET notify = ? WHERE id = ?')->execute([$on ? 1 : 0, $id]);
+        } catch (Throwable $e) {
+            error_log('[indexof] mise à jour impossible : ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Parmi ces identifiants, ceux qui n'ont jamais été signalés — et les marque
+     * aussitôt. Faire les deux d'un coup évite qu'un plantage entre les deux
+     * étapes ne provoque une seconde notification.
+     *
+     * @param array<int,string> $guids
+     * @return array<int,string>
+     */
+    public function takeUnseen(int $searchId, array $guids): array
+    {
+        $pdo = $this->db();
+        if ($pdo === null || $guids === []) {
+            return [];
+        }
+        try {
+            $check = $pdo->prepare('SELECT 1 FROM seen WHERE search_id = ? AND guid = ?');
+            $mark  = $pdo->prepare('INSERT OR IGNORE INTO seen (search_id, guid, created_at) VALUES (?, ?, ?)');
+            $now   = time();
+            $neufs = [];
+            $pdo->beginTransaction();
+            foreach ($guids as $g) {
+                $check->execute([$searchId, $g]);
+                if ($check->fetchColumn() === false) {
+                    $neufs[] = $g;
+                }
+                $mark->execute([$searchId, $g, $now]);
+            }
+            $pdo->commit();
+            return $neufs;
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('[indexof] suivi des nouveautés impossible : ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Recherches dont la notification est active.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function notifiedSearches(): array
+    {
+        return array_values(array_filter($this->searches(), static fn (array $s): bool => (int) $s['notify'] === 1));
+    }
+
     public function deleteSearch(int $id): void
     {
         $pdo = $this->db();
@@ -272,6 +348,7 @@ final class Store
         }
         try {
             $pdo->prepare('DELETE FROM searches WHERE id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM seen WHERE search_id = ?')->execute([$id]);
         } catch (Throwable $e) {
             error_log('[indexof] suppression impossible : ' . $e->getMessage());
         }

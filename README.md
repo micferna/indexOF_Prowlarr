@@ -109,6 +109,8 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
 | `LIDARR_URL` / `LIDARR_API_KEY` | Lidarr | _(vide)_ |
 | `READARR_URL` / `READARR_API_KEY` | Readarr | _(vide)_ |
 | `TRUST_PROXY` | `1` seulement derrière un reverse-proxy qui pose `X-Forwarded-For` | `0` |
+| `DISCORD_WEBHOOK` | Webhook d'un salon Discord. Vide = cloche masquée | _(vide)_ |
+| `NOTIFY_INTERVAL` | Secondes entre deux vérifications du service de veille | `900` |
 | `DATA_DIR` | Répertoire de la base SQLite (historique, recherches enregistrées) | `/var/lib/indexof` |
 | `CACHE_TTL` | Durée du cache recherches/indexeurs (s) | `120` |
 | `CACHE_DIR` | Répertoire de cache | `/tmp/indexof_cache` |
@@ -136,6 +138,21 @@ pointent vers le proxy de téléchargement, avec un lien scellé.
 > vous voyez l'application (`http://localhost:8080/rss.php?t=…`). Un qBittorrent
 > qui tourne dans le même Docker Compose ne joint pas `localhost` : remplacez
 > l'hôte par le nom du service, soit `http://web/rss.php?t=…`.
+
+## Notifications Discord
+
+Le flux RSS prévient qBittorrent ; ceci vous prévient, vous. Renseignez
+`DISCORD_WEBHOOK` dans `.env`, activez la cloche sur les recherches à surveiller,
+puis lancez le service — optionnel, derrière un profil :
+
+```bash
+docker compose --profile notify up -d
+```
+
+Il rejoue les recherches surveillées toutes les 15 minutes (`NOTIFY_INTERVAL`) et
+ne signale que ce qu'il n'a jamais vu pour cette recherche. La première exécution
+enregistre l'existant **sans rien envoyer** : sinon elle déverserait des centaines
+de lignes d'un coup.
 
 ## Sonarr, Radarr et consorts
 
@@ -194,6 +211,7 @@ src/                    # Hors racine web
   Bencode.php           # Lecture du contenu d'un .torrent
   ArrClient.php         # Client Sonarr/Radarr/Lidarr/Readarr (release/push)
   Store.php             # Base SQLite : envois mémorisés, recherches enregistrées
+bin/notify.php          # Veille : signale les nouveautés sur Discord
 tests/                  # Tests PHPUnit (fonctions critiques)
 docker/nginx.conf       # Vhost nginx (reverse-proxy FastCGI vers php-fpm)
 Dockerfile              # Multi-stage : php-fpm (app) + nginx (web), base Alpine

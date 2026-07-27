@@ -79,7 +79,7 @@ const state = {
     total: 0, capped: false, page: 1, maskOn: false, loading: false,
     qbit: false, qbitCategories: [], qbitCategory: "", arr: {},
     view: "search", health: [], transfersTab: "live", transferFilter: "all", transfers: [], history: [],
-    qbitNames: new Set(), store: false, saved: [],
+    qbitNames: new Set(), store: false, notify: false, saved: [],
 };
 
 const $ = (s) => document.querySelector(s);
@@ -968,6 +968,7 @@ async function loadStatus() {
         state.qbitCategories = s.qbitCategories || [];
         state.arr = s.arr || {};
         state.store = !!s.store;
+        state.notify = !!s.notify;
         if (state.qbit) loadTransfers();
         if (state.store) loadSaved();
         renderQbitCategories();
@@ -1551,9 +1552,25 @@ function renderSaved() {
             copyText(url.toString(), "Adresse du flux copiée");
         });
 
+        // Cloche : n'apparaît que si un webhook est configuré, sinon elle
+        // promettrait quelque chose qui n'arriverait jamais.
+        let cloche = null;
+        if (state.notify) {
+            const actif = Number(s.notify) === 1;
+            cloche = el("button", { type: "button", class: "saved-del" + (actif ? " on" : ""),
+                text: actif ? "🔔" : "🔕",
+                title: actif ? "Prévenir sur Discord — actif" : "Prévenir sur Discord des nouveautés" });
+            cloche.addEventListener("click", async () => {
+                const { ok, data } = await postForm("searches.php",
+                    { op: "notify", id: s.id, on: actif ? "0" : "1" });
+                toast(ok ? data.message : (data.error || "Échec"));
+                loadSaved();
+            });
+        }
+
         const del = el("button", { type: "button", class: "saved-del", text: "✕", title: "Supprimer" });
         del.addEventListener("click", () => deleteSaved(s.id));
-        chip.append(run, feed, del);
+        chip.append(run, feed, ...(cloche ? [cloche] : []), del);
         return chip;
     }));
 }

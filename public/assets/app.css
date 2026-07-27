@@ -654,6 +654,8 @@ a.rel:hover { color: var(--amber); }
     font-size: 10px;
 }
 .saved-del:hover { color: var(--warn); background: rgba(232, 115, 90, 0.12); }
+.saved-del.on { color: var(--amber); }
+.saved-del.on:hover { color: var(--amber); background: var(--amber-soft); }
 
 .saved-add { display: flex; gap: 6px; margin-top: 8px; }
 .saved-input {

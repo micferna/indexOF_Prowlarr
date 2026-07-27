@@ -119,6 +119,55 @@ final class StoreTest extends TestCase
         $this->assertFalse($store->feedTokenExists($token));
     }
 
+    /**
+     * Le suivi des nouveautés décide de ce qui part en notification : une
+     * release déjà signalée ne doit jamais l'être deux fois.
+     */
+    public function testTakeUnseenReturnsOnlyNewOnesAndRemembers(): void
+    {
+        $store = new Store($this->file);
+        $id = $store->saveSearch([
+            'name' => 'Veille', 'query' => 'dune', 'days' => 0,
+            'cats' => '', 'trackers' => '', 'safe' => true,
+        ]);
+
+        $premiers = $store->takeUnseen($id, ['a', 'b', 'c']);
+        $this->assertSame(['a', 'b', 'c'], $premiers);
+
+        // Rejouées, elles ne ressortent pas ; seule la nouvelle apparaît.
+        $this->assertSame(['d'], $store->takeUnseen($id, ['a', 'b', 'c', 'd']));
+        $this->assertSame([], $store->takeUnseen($id, ['a', 'd']));
+
+        // Le suivi est propre à chaque recherche.
+        $autre = $store->saveSearch([
+            'name' => 'Autre', 'query' => 'x', 'days' => 0,
+            'cats' => '', 'trackers' => '', 'safe' => true,
+        ]);
+        $this->assertSame(['a'], $store->takeUnseen($autre, ['a']));
+
+        // Supprimer la recherche efface son suivi.
+        $store->deleteSearch($id);
+        $this->assertSame(['a'], $store->takeUnseen($id, ['a']));
+    }
+
+    public function testNotifyToggle(): void
+    {
+        $store = new Store($this->file);
+        $id = $store->saveSearch([
+            'name' => 'Veille', 'query' => 'dune', 'days' => 0,
+            'cats' => '', 'trackers' => '', 'safe' => true,
+        ]);
+        $this->assertSame([], $store->notifiedSearches(), 'désactivé par défaut');
+
+        $store->setNotify($id, true);
+        $actives = $store->notifiedSearches();
+        $this->assertCount(1, $actives);
+        $this->assertSame('Veille', $actives[0]['name']);
+
+        $store->setNotify($id, false);
+        $this->assertSame([], $store->notifiedSearches());
+    }
+
     public function testUnavailableStoreDegradesInsteadOfThrowing(): void
     {
         // Chemin impossible à créer : l'application doit continuer de tourner.
@@ -134,6 +183,9 @@ final class StoreTest extends TestCase
         ]));
         $this->assertNull($store->searchByToken(str_repeat('a', 32)));
         $this->assertFalse($store->feedTokenExists(str_repeat('a', 32)));
+        $this->assertSame([], $store->takeUnseen(1, ['a']));
+        $this->assertSame([], $store->notifiedSearches());
+        $store->setNotify(1, true);
         // Ne doit lever aucune exception.
         $store->recordSend('Titre', 'Indexeur', 'qbit');
         $store->deleteSearch(1);
