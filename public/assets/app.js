@@ -470,7 +470,7 @@ function renderResults() {
 
     const table = el("table", {},
         el("thead", {}, renderHeadRow()),
-        el("tbody", {}, ...shown.map((r, i) => renderRow(r, i))));
+        el("tbody", {}, ...shown.map((r) => renderRow(r))));
 
     const parts = top ? [topBanner(), meta, el("div", { class: "table-wrap" }, table)]
                        : [meta, el("div", { class: "table-wrap" }, table)];
