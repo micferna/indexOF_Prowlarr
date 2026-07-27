@@ -3,7 +3,7 @@
 Interface web légère (PHP) pour rechercher des releases via l'API [Prowlarr](https://prowlarr.com/), trier les résultats et télécharger les fichiers `.torrent` (ou ouvrir les liens magnet).
 
 ![Logo Discord](https://zupimages.net/up/23/26/rumo.png)
-[Rejoignez le Discord !](https://discord.gg/rSfTxaW)
+[Rejoignez le Discord !](https://discord.gg/4P5teKzGUE)
 
 <p align="center">
   <img src="docs/screenshot.png" alt="Liste de résultats indexOF : nom de release en clair, tokens techniques mis en valeur, taille, seeders et âge">
