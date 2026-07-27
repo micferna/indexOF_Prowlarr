@@ -26,6 +26,10 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    # Les sessions survivent au redéploiement : sans ce volume elles vivent en
+    # tmpfs et chaque `up -d php` déconnecte tous les utilisateurs.
+    volumes:
+      - php-sessions:/var/lib/php/sessions
 
   web:
     build:
@@ -97,6 +101,9 @@ services:
       - indexof
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  php-sessions:
 
 networks:
   indexof:

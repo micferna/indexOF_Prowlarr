@@ -67,7 +67,7 @@ $qbit = new QbittorrentClient(
     $config['qbit_url'],
     $config['qbit_user'],
     $config['qbit_pass'],
-    $config['timeout'],
+    $config['qbit_timeout'],
 );
 
 try {

@@ -20,6 +20,9 @@ RUN set -eux; \
       echo 'session.use_only_cookies = 1'; \
       echo 'session.cookie_httponly = 1'; \
       echo 'session.cookie_samesite = Lax'; \
+      # Sessions hors de /tmp (monté en tmpfs) : sinon chaque déploiement
+      # déconnecte tout le monde. Le répertoire est un volume nommé.
+      echo 'session.save_path = /var/lib/php/sessions'; \
     } > "$PHP_INI_DIR/conf.d/zz-app.ini"; \
     # php-fpm efface l'environnement par défaut : on le conserve pour getenv().
     printf '[www]\nclear_env = no\n' > /usr/local/etc/php-fpm.d/zz-clear-env.conf
@@ -34,7 +37,9 @@ COPY public/ ./public/
 # de build (lecture seule : rien n'est inscriptible).
 RUN chmod -R a=rX,u+w /var/www/html/src /var/www/html/public
 
-RUN mkdir -p /tmp/indexof_cache && chown -R www-data:www-data /tmp/indexof_cache
+RUN mkdir -p /tmp/indexof_cache /var/lib/php/sessions \
+    && chown -R www-data:www-data /tmp/indexof_cache /var/lib/php/sessions \
+    && chmod 700 /var/lib/php/sessions
 
 # Tourne sans privilège root (le pool fpm n'a pas besoin de setuid).
 USER www-data

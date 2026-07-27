@@ -42,6 +42,20 @@ function json_response(array $data, int $code = 200): never
     exit;
 }
 
+/**
+ * URL d'un asset suffixée par sa date de modification.
+ *
+ * nginx sert les fichiers statiques avec `max-age=86400` : sans ce suffixe, un
+ * navigateur continue de servir l'ancien CSS/JS pendant 24 h après un
+ * déploiement — et un CSS neuf avec un JS périmé donne une page cassée.
+ */
+function asset(string $path): string
+{
+    $file = __DIR__ . '/../public/' . ltrim($path, '/');
+    $version = is_file($file) ? (string) filemtime($file) : '0';
+    return $path . '?v=' . $version;
+}
+
 /** Échappement HTML systématique (ENT_QUOTES couvre " et '). */
 function e(?string $value): string
 {

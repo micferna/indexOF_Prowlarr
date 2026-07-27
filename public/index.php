@@ -23,11 +23,9 @@ $showLogout = auth_enabled($config);
     <meta name="csrf" content="<?php echo e($csrf); ?>">
     <title>indexOF · Recherche Prowlarr</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
-    <link rel="stylesheet" href="assets/app.css">
+    <link rel="stylesheet" href="<?php echo e(asset('assets/app.css')); ?>">
 </head>
 <body>
-    <div class="aurora" aria-hidden="true"></div>
-
     <header class="appbar">
         <a class="brand-mini" href="index.php" aria-label="indexOF — accueil">
             <span class="brand-mark">⌕</span>
@@ -64,6 +62,10 @@ $showLogout = auth_enabled($config);
                     <span class="fp-label">Indexeurs</span>
                     <div id="trackers" class="chips" aria-label="Filtrer par indexeur"></div>
                 </div>
+                <div id="facets" class="fp-section" hidden>
+                    <span class="fp-label">Affiner <span class="fp-hint">— dans les résultats affichés</span></span>
+                    <div id="facets-body"></div>
+                </div>
                 <div class="fp-foot">
                     <button type="button" id="mask-toggle" class="mask-btn" aria-pressed="false"
                             title="Masquer / révéler les noms d'indexeurs">
@@ -92,11 +94,10 @@ $showLogout = auth_enabled($config);
         </div>
     </header>
 
-    <section id="facets" class="facets" hidden aria-label="Filtres"></section>
     <main id="results" class="results" aria-live="polite"></main>
 
     <noscript><p class="noscript">JavaScript est requis pour cette application.</p></noscript>
 
-    <script src="assets/app.js" defer></script>
+    <script src="<?php echo e(asset('assets/app.js')); ?>" defer></script>
 </body>
 </html>

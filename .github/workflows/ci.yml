@@ -56,7 +56,7 @@ jobs:
         run: composer audit --no-interaction
 
       - name: PHPStan
-        run: vendor/bin/phpstan analyse --no-progress
+        run: vendor/bin/phpstan analyse --no-progress --memory-limit=512M
 
       - name: PHPUnit
         run: vendor/bin/phpunit

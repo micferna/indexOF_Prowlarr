@@ -14,14 +14,17 @@ const CATS = [
 ];
 
 const COLUMNS = [
-    { key: "indexer", label: "Indexeur" },
-    { key: "title", label: "Titre", sortable: true },
-    { key: "size", label: "Taille", sortable: true, right: true },
-    { key: "seeders", label: "Seed", sortable: true, right: true },
-    { key: "leechers", label: "Leech", sortable: true, right: true },
-    { key: "publishDate", label: "Âge", sortable: true, right: true },
-    { key: "actions", label: "" },
+    { key: "title", label: "Release", sortable: true },
+    { key: "size", label: "Taille", sortable: true, num: true },
+    { key: "seeders", label: "Seed", sortable: true, num: true },
+    { key: "publishDate", label: "Âge", sortable: true, num: true },
+    { key: "actions", label: "", num: true },
 ];
+
+/* Tokens techniques d'un nom de release. Sert à les mettre en valeur là où ils
+   sont déjà écrits, plutôt qu'à les recopier en pastilles sous chaque ligne. */
+const TOKEN_RE = /^(2160p|1080p|720p|480p|4k|uhd|remux|blu-?ray|bdrip|brrip|web-?dl|webrip|web|hdtv|x26[45]|h\.?26[45]|hevc|avc|av1|hdr10\+?|hdr|dovi|dv|atmos|truehd|dts-?hd|dts|ddp?5\.1|e?ac3|flac|aac|multi|multilang|vostfr|truefrench|french|vff|vfq|vfi|subfrench|imax|proper|repack|extended|remastered|10bit)$/i;
+const YEAR_RE = /^(19|20)\d{2}$/;
 
 const SVGNS = "http://www.w3.org/2000/svg";
 const ICONS = {
@@ -68,6 +71,7 @@ const filtersCount = $("#filters-count");
 const filtersReset = $("#filters-reset");
 const resultsBox = $("#results");
 const facetsBox = $("#facets");
+const facetsBody = $("#facets-body");
 const statusBox = $("#status");
 const historyList = $("#history");
 const qbitCatWrap = $("#qbit-cat-wrap");
@@ -149,7 +153,7 @@ function renderChips(indexers) {
 /* ---------- panneau Filtres ---------- */
 function updateFiltersCount() {
     if (!filtersCount) return;
-    const n = state.cats.size + state.trackers.size + (state.days !== 0 ? 1 : 0);
+    const n = state.cats.size + state.trackers.size + (state.days !== 0 ? 1 : 0) + facetCount();
     filtersCount.textContent = n ? ` · ${n}` : "";
     filtersBtn.classList.toggle("has-sel", n > 0);
 }
@@ -175,10 +179,12 @@ if (filtersReset) {
         state.cats.clear();
         state.trackers.clear();
         state.days = 0;
+        clearFacets();
         try { localStorage.setItem("days", "0"); } catch (e) {}
         renderDays();
         renderCats();
         renderChips(lastIndexers);
+        renderFacets();
         rerunOrSync();
     });
 }
@@ -251,7 +257,7 @@ async function runSearch() {
     const top = state.mode === "top";
     if (!top && !state.query) { state.results = []; renderIdle(); return; }
     setLoading(true);
-    state.facets = { minSeeders: 0, freeleech: false, quality: new Set() };
+    clearFacets();
     renderSkeleton();
 
     const p = new URLSearchParams({ action: "search", days: state.days });
@@ -317,8 +323,11 @@ function toggleSort(field) {
     renderResults();
 }
 
+/* Les facettes vivent dans le panneau Filtres : tout le filtrage au même
+   endroit, rien qui encombre la liste. Ce qui est actif remonte au-dessus des
+   résultats sous forme de jetons retirables (voir activeFilterChips). */
 function renderFacets() {
-    if (!state.results.length) { facetsBox.hidden = true; facetsBox.replaceChildren(); return; }
+    if (!state.results.length) { hideFacets(); return; }
     facetsBox.hidden = false;
 
     const present = new Set();
@@ -326,66 +335,96 @@ function renderFacets() {
     const hasFree = state.results.some((r) => r.freeleech);
     const maxSeed = Math.max(10, ...state.results.map((r) => r.seeders));
 
-    const parts = [el("span", { class: "facet-title", text: "Filtrer" })];
-
     const slider = el("input", { type: "range", min: "0", max: String(maxSeed),
         value: String(state.facets.minSeeders), class: "facet-range" });
     const seedVal = el("span", { class: "facet-val", text: "≥ " + state.facets.minSeeders });
     slider.addEventListener("input", () => {
         state.facets.minSeeders = parseInt(slider.value, 10);
         seedVal.textContent = "≥ " + slider.value;
-        state.page = 1; renderResults();
+        state.page = 1; renderResults(); updateFiltersCount();
     });
-    parts.push(el("label", { class: "facet" }, el("span", { class: "facet-lbl", text: "Seeders" }), slider, seedVal));
 
-    if (hasFree) {
-        const fl = el("button", { type: "button", text: "Freeleech",
-            class: "facet-chip" + (state.facets.freeleech ? " active" : "") });
-        fl.addEventListener("click", () => {
-            state.facets.freeleech = !state.facets.freeleech; fl.classList.toggle("active");
-            state.page = 1; renderResults();
-        });
-        parts.push(fl);
-    }
-
+    const chips = el("div", { class: "chips" });
+    if (hasFree) chips.append(facetChip("Freeleech", () => state.facets.freeleech,
+        () => { state.facets.freeleech = !state.facets.freeleech; }));
     QUALITY_ORDER.filter((q) => present.has(q)).forEach((q) => {
-        const chip = el("button", { type: "button", text: q,
-            class: "facet-chip" + (state.facets.quality.has(q) ? " active" : "") });
-        chip.addEventListener("click", () => {
-            state.facets.quality.has(q) ? state.facets.quality.delete(q) : state.facets.quality.add(q);
-            chip.classList.toggle("active"); state.page = 1; renderResults();
-        });
-        parts.push(chip);
+        chips.append(facetChip(q, () => state.facets.quality.has(q),
+            () => { state.facets.quality.has(q) ? state.facets.quality.delete(q) : state.facets.quality.add(q); }));
     });
 
-    if (state.facets.minSeeders || state.facets.freeleech || state.facets.quality.size) {
-        const reset = el("button", { type: "button", class: "facet-reset", text: "✕ Réinitialiser" });
-        reset.addEventListener("click", () => {
-            state.facets = { minSeeders: 0, freeleech: false, quality: new Set() };
-            state.page = 1; renderFacets(); renderResults();
-        });
-        parts.push(reset);
-    }
+    facetsBody.replaceChildren(
+        el("label", { class: "facet" }, el("span", { class: "facet-lbl", text: "Seeders" }), slider, seedVal),
+        chips,
+    );
+    updateFiltersCount();
+}
 
-    facetsBox.replaceChildren(...parts);
+function facetChip(label, isActive, toggle) {
+    const chip = el("button", { type: "button", text: label,
+        class: "facet-chip" + (isActive() ? " active" : "") });
+    chip.addEventListener("click", () => {
+        toggle();
+        chip.classList.toggle("active", isActive());
+        state.page = 1;
+        renderResults();
+        updateFiltersCount();
+    });
+    return chip;
+}
+
+function facetCount() {
+    return (state.facets.minSeeders > 0 ? 1 : 0)
+        + (state.facets.freeleech ? 1 : 0)
+        + state.facets.quality.size;
+}
+
+function clearFacets() {
+    state.facets = { minSeeders: 0, freeleech: false, quality: new Set() };
+}
+
+/** Jetons des facettes actives, retirables d'un clic, au-dessus des résultats. */
+function activeFilterChips() {
+    if (!facetCount()) return null;
+    const wrap = el("span", { class: "active-filters" });
+    const drop = (fn) => () => { fn(); state.page = 1; renderFacets(); renderResults(); };
+
+    if (state.facets.minSeeders > 0) {
+        const c = el("button", { type: "button", class: "af-chip", text: "≥ " + state.facets.minSeeders + " seed" });
+        c.addEventListener("click", drop(() => { state.facets.minSeeders = 0; }));
+        wrap.append(c);
+    }
+    if (state.facets.freeleech) {
+        const c = el("button", { type: "button", class: "af-chip", text: "Freeleech" });
+        c.addEventListener("click", drop(() => { state.facets.freeleech = false; }));
+        wrap.append(c);
+    }
+    [...state.facets.quality].forEach((q) => {
+        const c = el("button", { type: "button", class: "af-chip", text: q });
+        c.addEventListener("click", drop(() => state.facets.quality.delete(q)));
+        wrap.append(c);
+    });
+    return wrap;
 }
 
 /* ---------- rendu ---------- */
-function hideFacets() { facetsBox.hidden = true; facetsBox.replaceChildren(); }
+function hideFacets() { facetsBox.hidden = true; facetsBody.replaceChildren(); updateFiltersCount(); }
 function renderIdle() {
     hideFacets();
+    observeMore(null);
     resultsBox.replaceChildren(el("div", { class: "state" },
         el("span", { class: "emoji", text: "🛰️" }),
         "Lancez une recherche pour interroger vos indexeurs."));
 }
 function renderSkeleton() {
     hideFacets();
+    observeMore(null);
     const rows = Array.from({ length: 6 }, () => el("div", { class: "sk-row" }));
     resultsBox.replaceChildren(el("div", { class: "table-wrap" },
-        el("div", { class: "skeleton" }, el("div", { class: "spinner" }), ...rows)));
+        el("div", { class: "skeleton" }, ...rows)));
 }
 function renderError(msg) {
     hideFacets();
+    observeMore(null);
     resultsBox.replaceChildren(el("div", { class: "state error" },
         el("span", { class: "emoji", text: "⚠️" }), msg));
 }
@@ -409,25 +448,25 @@ function renderResults() {
         resultsBox.replaceChildren(
             ...(top ? [topBanner()] : []),
             el("div", { class: "state" }, el("span", { class: "emoji", text: top ? "🔥" : "🔍" }), msg));
+        observeMore(null);
         return;
     }
     const shown = all.slice(0, state.page * PAGE_SIZE);
 
+    // Compte : ce qui est affiché, et sur quel total.
     const left = el("span", {}, el("b", { text: String(all.length) }), ` résultat${all.length > 1 ? "s" : ""}`);
-    if (all.length < state.results.length) left.append(el("span", { class: "muted", text: ` (sur ${state.results.length})` }));
+    if (all.length < state.results.length) left.append(el("span", { class: "muted", text: ` sur ${state.results.length}` }));
     else if (state.total > state.results.length) left.append(el("span", { class: "muted", text: ` sur ${state.total}` }));
 
     const right = el("span", { class: "meta-actions" });
     if (state.days !== 0) {
-        const btn = el("button", { type: "button", class: "link-btn", text: "↔ Élargir à tout" });
-        btn.addEventListener("click", () => { setDays(0); renderDays(); state.page = 1; runSearch(); });
+        const btn = el("button", { type: "button", class: "link-btn", text: "Élargir à toutes les dates" });
+        btn.addEventListener("click", () => { setDays(0); state.page = 1; runSearch(); });
         right.append(btn);
     } else if (state.capped) {
-        right.append(el("span", { class: "muted", text: "Affine ta recherche pour voir le reste" }));
-    } else {
-        right.append(el("span", { class: "muted", text: state.cats.size ? `${state.cats.size} catégorie(s)` : "Toutes catégories" }));
+        right.append(el("span", { class: "muted", text: "Affine la recherche pour voir le reste" }));
     }
-    const meta = el("div", { class: "meta-row" }, left, right);
+    const meta = el("div", { class: "meta-row" }, left, activeFilterChips(), right);
 
     const table = el("table", {},
         el("thead", {}, renderHeadRow()),
@@ -435,20 +474,44 @@ function renderResults() {
 
     const parts = top ? [topBanner(), meta, el("div", { class: "table-wrap" }, table)]
                        : [meta, el("div", { class: "table-wrap" }, table)];
+
+    // Le bouton reste (repli clavier et sans IntersectionObserver), mais il
+    // s'enclenche tout seul dès qu'il approche du bas : on fait défiler, ça
+    // charge.
+    let more = null;
     if (shown.length < all.length) {
-        const more = el("button", { type: "button", class: "load-more",
+        more = el("button", { type: "button", class: "load-more",
             text: `Charger plus (${all.length - shown.length} restants)` });
-        more.addEventListener("click", () => { state.page++; renderResults(); });
+        more.addEventListener("click", loadMore);
         parts.push(more);
     }
     resultsBox.replaceChildren(...parts);
+    observeMore(more);
+}
+
+function loadMore() {
+    state.page++;
+    renderResults();
+}
+
+/* Défilement infini : on surveille le bouton de fin de liste. */
+let moreObserver = null;
+function observeMore(btn) {
+    if (moreObserver) { moreObserver.disconnect(); moreObserver = null; }
+    if (!btn || typeof IntersectionObserver === "undefined") return;
+    moreObserver = new IntersectionObserver((entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        moreObserver.disconnect();
+        moreObserver = null;
+        loadMore();
+    }, { rootMargin: "400px" });
+    moreObserver.observe(btn);
 }
 
 function renderHeadRow() {
     const tr = el("tr");
     for (const col of COLUMNS) {
-        const th = el("th", { text: col.label });
-        if (col.right) th.style.textAlign = "right";
+        const th = el("th", { text: col.label, class: col.num ? "num" : (col.cls || "") });
         if (col.sortable) {
             th.classList.add("sortable");
             th.append(el("span", { class: "arrow", text: "▲" }));
@@ -467,53 +530,98 @@ function renderHeadRow() {
     return tr;
 }
 
-function renderRow(r, i) {
-    const tr = el("tr");
-    tr.style.animationDelay = Math.min(i * 20, 300) + "ms";
+/**
+ * Découpe un nom de release en deux parties lisibles :
+ *   « The.Matrix.1999 » → titre en clair,
+ *   « .REMASTERED.MULTi.2160p.BluRay-REBiRTH » → suite technique en monospace,
+ * tokens de qualité en ambre, groupe de release en retrait.
+ * Les titres déjà rédigés en clair (avec des espaces) sont laissés tels quels.
+ */
+function renderRelease(title) {
+    const frag = document.createDocumentFragment();
 
-    tr.append(el("td", {}, el("span", { class: "idx-tag maskable", text: r.indexer })));
-
-    // Titre + badges qualité + freeleech
-    const titleCell = el("td", { class: "cell-title" });
-    if (r.dl || r.magnet) {
-        const titleNode = r.infoUrl && r.infoUrl !== "#"
-            ? el("a", { href: r.infoUrl, target: "_blank", rel: "noopener noreferrer", text: r.title })
-            : el("span", { text: r.title });
-        titleCell.append(titleNode);
+    // Point de bascule : l'année si elle existe, sinon le premier token
+    // technique. Avant = ce que l'humain lit, après = ce que la machine décrit.
+    let cut = -1;
+    const year = title.match(/(?:^|[.\s])((?:19|20)\d{2})(?=[.\s]|$)/);
+    if (year) {
+        cut = year.index + year[0].length;
     } else {
-        titleCell.append(el("span", { text: r.title }));
+        const parts = title.split(/([.\s])/);
+        let pos = 0;
+        for (const piece of parts) {
+            if (TOKEN_RE.test(piece)) { cut = pos; break; }
+            pos += piece.length;
+        }
     }
-    const badges = el("div", { class: "badges" });
-    if (r.freeleech) badges.append(el("span", { class: "badge badge-fl", text: "FREE" }));
-    if (r.category) badges.append(el("span", { class: "badge badge-cat", text: r.category }));
-    (r.badges || []).forEach((b) => badges.append(el("span", { class: "badge", text: b })));
-    if (badges.children.length) titleCell.append(badges);
+
+    const name = cut > 0 ? title.slice(0, cut) : title;
+    let tech = cut > 0 ? title.slice(cut) : "";
+
+    frag.append(el("span", { class: "rel-name", text: name.replace(/\./g, " ").trim() }));
+    if (tech === "") return frag;
+
+    const techNode = el("span", { class: "rel-tech" });
+    // Le titre peut se terminer sans séparateur (« … (2003)MULTi ») : on en pose un.
+    if (!/^[.\s\-_]/.test(tech)) techNode.append(document.createTextNode(" "));
+    // Groupe de release : ce qui suit le dernier tiret, s'il ne contient plus de point.
+    let group = "";
+    const dash = tech.lastIndexOf("-");
+    if (dash > 0 && !tech.slice(dash + 1).includes(".")) {
+        group = tech.slice(dash);
+        tech = tech.slice(0, dash);
+    }
+    tech.split(/([.\-_\s]+)/).forEach((piece) => {
+        if (!piece) return;
+        if (TOKEN_RE.test(piece)) techNode.append(el("span", { class: "tk", text: piece }));
+        else techNode.append(document.createTextNode(piece));
+    });
+    if (group) techNode.append(el("span", { class: "grp", text: group }));
+    frag.append(techNode);
+    return frag;
+}
+
+function renderRow(r) {
+    const tr = el("tr");
+
+    // Liseré de qualité : niveau de résolution lisible d'un coup d'œil vertical.
+    const badges = r.badges || [];
+    if (badges.includes("2160p")) tr.classList.add("q-uhd");
+    else if (badges.includes("1080p")) tr.classList.add("q-hd");
+
+    const titleCell = el("td", { class: "cell-title" });
+    const linkable = r.infoUrl && r.infoUrl !== "#";
+    const titleNode = linkable
+        ? el("a", { class: "rel", href: r.infoUrl, target: "_blank", rel: "noopener noreferrer", title: r.title })
+        : el("span", { class: "rel", title: r.title });
+    titleNode.append(renderRelease(r.title));
+    titleCell.append(titleNode);
+
+    const meta = el("div", { class: "rel-meta" });
+    meta.append(el("span", { class: "idx-tag maskable", text: r.indexer }));
+    if (r.category) {
+        meta.append(el("span", { class: "sep", text: "·" }), el("span", { text: r.category }));
+    }
+    if (r.freeleech) meta.append(el("span", { class: "badge-fl", text: "FREE" }));
+    if (r.adult) meta.append(el("span", { class: "badge-adult", text: "-18" }));
+    titleCell.append(meta);
     tr.append(titleCell);
 
-    tr.append(rightCell("num muted", r.sizeHuman));
+    tr.append(el("td", { class: "num" }, r.sizeHuman));
 
     const sc = r.seeders >= 20 ? "s-good" : r.seeders >= 5 ? "s-mid" : "s-low";
-    const seed = el("td", {}, el("span", { class: "seed " + sc }, el("span", { class: "dot" }), String(r.seeders)));
-    seed.style.textAlign = "right";
-    tr.append(seed);
-
-    tr.append(rightCell("num muted", String(r.leechers)));
+    const seedCell = el("td", { class: "num" },
+        el("span", { class: "seed " + sc }, el("span", { class: "dot" }), String(r.seeders)));
+    if (r.leechers) seedCell.append(el("span", { class: "leech", text: " /" + r.leechers }));
+    tr.append(seedCell);
 
     const age = r.daysOld == null ? "—" : (r.daysOld === 0 ? "auj." : r.daysOld + " j");
-    const ageCell = rightCell("num muted", age);
+    const ageCell = el("td", { class: "num" }, age);
     ageCell.title = r.publishDate || "";
     tr.append(ageCell);
 
-    const act = el("td", {}, renderActions(r));
-    act.style.textAlign = "right";
-    tr.append(act);
+    tr.append(el("td", { class: "num" }, renderActions(r)));
     return tr;
-}
-
-function rightCell(cls, txt) {
-    const td = el("td", { class: cls }, txt);
-    td.style.textAlign = "right";
-    return td;
 }
 
 function torrentHref(dl) {

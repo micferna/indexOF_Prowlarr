@@ -168,6 +168,12 @@ final class ProwlarrClient
         $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         curl_close($ch);
 
+        // 28 = CURLE_OPERATION_TIMEDOUT. Cas fréquent et non fatal : un indexeur
+        // en erreur fait traîner toute la recherche. On le distingue pour
+        // pouvoir l'expliquer à l'utilisateur (504) au lieu d'un 502 générique.
+        if ($errno === 28) {
+            throw new RuntimeException("Prowlarr a dépassé le délai : {$error}", 504);
+        }
         if ($errno !== 0 || $body === false) {
             throw new RuntimeException("Prowlarr injoignable : {$error}");
         }

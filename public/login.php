@@ -55,12 +55,9 @@ $token = csrf_token();
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark">
     <title>indexOF · Connexion</title>
-    <link rel="stylesheet" href="assets/app.css">
+    <link rel="stylesheet" href="<?php echo e(asset('assets/app.css')); ?>">
 </head>
 <body class="login-body">
-    <div class="aurora" aria-hidden="true"></div>
-    <div class="login-glow" aria-hidden="true"></div>
-
     <main class="login-wrap">
         <form method="post" class="login-card<?php echo $error !== null ? ' shake' : ''; ?>">
             <div class="login-mark">⌕</div>
@@ -91,6 +88,6 @@ $token = csrf_token();
         <p class="login-foot">Recherche unifiée sur vos indexeurs Prowlarr</p>
     </main>
 
-    <script src="assets/login.js" defer></script>
+    <script src="<?php echo e(asset('assets/login.js')); ?>" defer></script>
 </body>
 </html>

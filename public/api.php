@@ -136,7 +136,7 @@ try {
                 $config['qbit_url'],
                 $config['qbit_user'],
                 $config['qbit_pass'],
-                $config['timeout'],
+                $config['qbit_timeout'],
             );
             $qbitCats = $qc->categories();
         }
@@ -229,5 +229,14 @@ try {
     // Détail loggé côté serveur uniquement (les messages cURL peuvent contenir
     // des hôtes/IP internes — pas de fuite au client).
     error_log('[indexof] api error: ' . $exception->getMessage());
+
+    // Le délai dépassé mérite un message actionnable : c'est presque toujours un
+    // indexeur en erreur qui bloque la recherche, pas une panne de l'app.
+    if ($exception->getCode() === 504) {
+        json_response([
+            'error' => "Délai dépassé : un indexeur ne répond pas. Réessaie, "
+                . "ou décoche l'indexeur signalé en erreur (⚠) dans les filtres.",
+        ], 504);
+    }
     json_response(['error' => 'Service momentanément indisponible.'], 502);
 }
