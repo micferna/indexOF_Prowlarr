@@ -93,6 +93,72 @@ final class QbittorrentClient
     }
 
     /**
+     * Liste des torrents connus de qBittorrent.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function torrents(): array
+    {
+        $ch = $this->newHandle();
+        if ($ch === false) {
+            return [];
+        }
+        try {
+            $body = $this->get($ch, '/api/v2/torrents/info');
+            if ($body === null) { // auth requise
+                $this->login($ch);
+                $body = $this->get($ch, '/api/v2/torrents/info');
+            }
+            $data = json_decode((string) $body, true);
+            return is_array($data) ? array_values(array_filter($data, 'is_array')) : [];
+        } finally {
+            curl_close($ch);
+        }
+    }
+
+    /**
+     * Agit sur un torrent : 'start', 'stop' ou 'delete'.
+     *
+     * qBittorrent 5 a remplacé pause/resume par stop/start ; les anciens noms
+     * renvoient 404. On tente le nom moderne et on retombe sur l'ancien pour
+     * rester compatible avec les versions 4.x.
+     *
+     * @throws RuntimeException si l'action échoue.
+     */
+    public function control(string $op, string $hash, bool $deleteFiles = false): void
+    {
+        $legacy = ['start' => 'resume', 'stop' => 'pause'];
+        if (!isset($legacy[$op]) && $op !== 'delete') {
+            throw new RuntimeException('Action inconnue.');
+        }
+
+        $fields = ['hashes' => $hash];
+        if ($op === 'delete') {
+            $fields['deleteFiles'] = $deleteFiles ? 'true' : 'false';
+        }
+
+        $ch = $this->newHandle();
+        if ($ch === false) {
+            throw new RuntimeException("Impossible d'initialiser la connexion à qBittorrent.");
+        }
+        try {
+            [$status] = $this->post($ch, '/api/v2/torrents/' . $op, $fields);
+            if ($status === 401 || $status === 403) {
+                $this->login($ch);
+                [$status] = $this->post($ch, '/api/v2/torrents/' . $op, $fields);
+            }
+            if ($status === 404 && isset($legacy[$op])) {
+                [$status] = $this->post($ch, '/api/v2/torrents/' . $legacy[$op], $fields);
+            }
+            if ($status < 200 || $status >= 300) {
+                throw new RuntimeException("qBittorrent a répondu HTTP {$status}.");
+            }
+        } finally {
+            curl_close($ch);
+        }
+    }
+
+    /**
      * Handle cURL partagé : timeouts stricts, schémas http(s) seulement, cookies
      * en mémoire (conserve le SID entre le login et l'appel suivant) et Referer
      * attendu par la protection CSRF de qBittorrent.

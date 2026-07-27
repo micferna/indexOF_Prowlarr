@@ -43,6 +43,12 @@ $showLogout = auth_enabled($config);
             <span class="btn-top-fire" aria-hidden="true">🔥</span><span class="btn-top-label">Top</span>
         </button>
 
+        <button type="button" id="transfers-btn" class="btn-top" hidden
+                title="Ce que qBittorrent est en train de télécharger ou de partager">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
+            <span class="btn-top-label">Transferts</span><span id="transfers-count" class="transfers-count"></span>
+        </button>
+
         <div class="filters-wrap">
             <button type="button" id="filters-btn" class="filters-btn" aria-expanded="false" aria-controls="filters-panel">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M6 12h12M10 19h4"/></svg>

@@ -217,7 +217,8 @@ body::before {
     background: var(--surface-2);
 }
 .btn-top-fire { font-size: 13px; line-height: 1; }
-.filters-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.btn-top svg,
+.filters-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .filters-btn.has-sel { color: var(--amber); border-color: var(--amber-line); background: var(--amber-soft); }
 .filters-count { font-variant-numeric: tabular-nums; }
 .tk-caret { font-size: 9px; color: var(--faint); }
@@ -615,6 +616,75 @@ a.rel:hover { color: var(--amber); }
     color: var(--warn);
     font-size: 10px;
     font-weight: 650;
+}
+
+/* ---------- Transferts ---------- */
+.transfers-count { color: var(--amber); font-variant-numeric: tabular-nums; }
+
+/* Barre de progression : fine, sous le nom, sans chiffre redondant dedans. */
+.prog {
+    height: 3px;
+    margin: 6px 0 5px;
+    border-radius: 2px;
+    background: var(--line);
+    overflow: hidden;
+}
+.prog-fill {
+    height: 100%;
+    background: var(--amber);
+    border-radius: 2px;
+    transition: width 0.4s ease;
+}
+.prog-fill.done { background: var(--live); }
+.prog-pct {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.spd {
+    display: block;
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--faint);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.spd.up { color: var(--muted); }
+
+.act-del:hover { color: var(--warn); border-color: rgba(232, 115, 90, 0.45); background: rgba(232, 115, 90, 0.1); }
+
+/* Suppression en deux temps : le choix reste dans la ligne. */
+.del-choice {
+    cursor: pointer;
+    padding: 4px 9px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    border: 1px solid var(--line-2);
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 11.5px;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.del-choice:hover { color: var(--text); border-color: var(--border-bright, var(--line-2)); }
+.del-choice.danger:hover {
+    color: var(--warn);
+    border-color: rgba(232, 115, 90, 0.45);
+    background: rgba(232, 115, 90, 0.1);
+}
+
+/* Release déjà présente dans le client : évite de la reprendre deux fois. */
+.badge-have {
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(79, 201, 138, 0.1);
+    border: 1px solid rgba(79, 201, 138, 0.28);
+    color: var(--live);
+    font-family: var(--f-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
 }
 
 /* Ligne sélectionnée au clavier (j / k). */

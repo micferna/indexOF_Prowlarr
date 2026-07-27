@@ -66,6 +66,10 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
 - **Actions** : télécharger le `.torrent` (proxy chiffré), ouvrir ou copier le magnet,
   envoyer à qBittorrent avec choix de la catégorie, ou pousser la release vers
   Sonarr / Radarr / Lidarr / Readarr.
+- **Transferts** : ce que qBittorrent télécharge ou partage, sans quitter l'app —
+  progression, ratio, vitesses, état. Arrêt, relance et suppression (avec ou sans
+  les fichiers, en deux temps, sans boîte de dialogue). Rafraîchi toutes les 3 s,
+  uniquement quand la vue est ouverte.
 - **Masquage des noms d'indexeurs** en un bouton, persisté localement ; le survol révèle.
 - **Filtre -18** appliqué côté serveur, indicateur des indexeurs en erreur, historique local.
 

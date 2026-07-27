@@ -32,6 +32,10 @@ const ICONS = {
     magnet: "M6 4v7a6 6 0 0 0 12 0V4M6 4H3m3 0v4m12-4h3m-3 0v4",
     send: "M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z",
     copy: "M9 9h10v10H9zM5 15H4V4h11v1",
+    pause: "M10 4H6v16h4zM18 4h-4v16h4z",
+    play: "M6 3l14 9-14 9z",
+    trash: "M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14",
+    close: "M18 6L6 18M6 6l12 12",
 };
 /* Une icône par application *arr : téléviseur, pellicule, note, livre. */
 const ARR_ICONS = {
@@ -61,6 +65,7 @@ const state = {
     results: [], rawResults: [], grouping: true,
     total: 0, capped: false, page: 1, maskOn: false, loading: false,
     qbit: false, qbitCategories: [], qbitCategory: "", arr: {},
+    view: "search", transfers: [], qbitNames: new Set(),
 };
 
 const $ = (s) => document.querySelector(s);
@@ -73,6 +78,8 @@ const chipsBox = $("#trackers");
 const maskBtn = $("#mask-toggle");
 const groupBtn = $("#group-toggle");
 const topBtn = $("#top-btn");
+const transfersBtn = $("#transfers-btn");
+const transfersCount = $("#transfers-count");
 const safeBtn = $("#safe-toggle");
 const filtersBtn = $("#filters-btn");
 const filtersPanel = $("#filters-panel");
@@ -254,6 +261,7 @@ if (safeBtn) {
 /* ---------- recherche ---------- */
 form.addEventListener("submit", (e) => {
     e.preventDefault();
+    setView("search");
     state.mode = "search";
     state.query = input.value.trim();
     state.page = 1;
@@ -264,6 +272,7 @@ form.addEventListener("submit", (e) => {
 /* ---------- Top (découverte sans recherche) ---------- */
 if (topBtn) {
     topBtn.addEventListener("click", () => {
+        setView("search");
         state.mode = "top";
         state.query = "";
         input.value = "";
@@ -707,6 +716,10 @@ function renderRow(r) {
     }
     if (r.freeleech) meta.append(el("span", { class: "badge-fl", text: "FREE" }));
     if (r.adult) meta.append(el("span", { class: "badge-adult", text: "-18" }));
+    // Rapprochement par nom : qBittorrent renomme parfois, c'est une indication.
+    if (state.qbitNames.has(normalizeName(r.title))) {
+        meta.append(el("span", { class: "badge-have", title: "Déjà présent dans qBittorrent", text: "DANS QBIT" }));
+    }
     titleCell.append(meta);
     tr.append(titleCell);
 
@@ -799,6 +812,7 @@ async function sendTo(r, btn, to) {
         if (res.ok && data.ok) {
             btn.classList.add("done");
             toast(data.message || "Envoyé");
+            if (to === "qbit") loadTransfers();
         } else {
             btn.classList.remove("busy");
             btn.disabled = false;
@@ -831,6 +845,7 @@ async function loadStatus() {
         state.qbit = !!s.qbit;
         state.qbitCategories = s.qbitCategories || [];
         state.arr = s.arr || {};
+        if (state.qbit) loadTransfers();
         renderQbitCategories();
 
         const dot = statusBox.querySelector(".status-dot");
@@ -936,6 +951,220 @@ async function init() {
     } catch (e) { renderChips([]); }
 
     if (state.mode === "top" || state.query) runSearch();
+}
+
+/* ==================================================================
+   Transferts
+
+   qBittorrent sait déjà tout : progression, ratio, vitesses, état. On ne
+   duplique rien, on l'interroge. Le rafraîchissement ne tourne que
+   lorsque la vue est ouverte — inutile d'interroger un client en boucle
+   pour une page que personne ne regarde.
+   ================================================================== */
+const TRANSFER_STATES = {
+    downloading: "Téléchargement", stalledDL: "En attente de sources",
+    metaDL: "Métadonnées", forcedDL: "Téléchargement forcé",
+    uploading: "Partage", stalledUP: "Partage (inactif)", forcedUP: "Partage forcé",
+    pausedDL: "En pause", pausedUP: "Terminé", stoppedDL: "Arrêté", stoppedUP: "Terminé",
+    queuedDL: "En file", queuedUP: "En file", checkingDL: "Vérification",
+    checkingUP: "Vérification", checkingResumeData: "Vérification",
+    moving: "Déplacement", error: "Erreur", missingFiles: "Fichiers manquants",
+    unknown: "Inconnu",
+};
+
+let transfersTimer = null;
+let pendingDelete = null;
+
+function normalizeName(s) {
+    return String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function formatSize(bytes) {
+    if (!bytes) return "0 o";
+    const units = ["o", "Ko", "Mo", "Go", "To"];
+    let v = bytes, i = 0;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return `${v < 10 ? v.toFixed(2) : v.toFixed(1)} ${units[i]}`;
+}
+
+function formatSpeed(bytesPerSec) {
+    if (!bytesPerSec) return "—";
+    const units = ["o/s", "Ko/s", "Mo/s", "Go/s"];
+    let v = bytesPerSec, i = 0;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
+}
+
+function formatEta(seconds) {
+    if (!seconds || seconds >= 8640000) return "—";
+    const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
+    if (h > 24) return `${Math.floor(h / 24)} j`;
+    return h ? `${h} h ${m} min` : `${m} min`;
+}
+
+async function loadTransfers() {
+    try {
+        const res = await fetch("api.php?action=transfers");
+        if (res.status === 401) { location.href = "login.php"; return; }
+        const data = await res.json();
+        state.transfers = data.torrents || [];
+        // Sert à marquer les résultats de recherche déjà présents dans le client.
+        state.qbitNames = new Set(state.transfers.map((t) => normalizeName(t.name)));
+        updateTransfersBadge();
+        if (state.view === "transfers") renderTransfers();
+    } catch (e) { /* le client peut être momentanément injoignable */ }
+}
+
+function updateTransfersBadge() {
+    if (!transfersBtn || !transfersCount) return;
+    transfersBtn.hidden = !state.qbit;
+    const actifs = state.transfers.filter((t) => t.dlspeed > 0 || t.upspeed > 0).length;
+    transfersCount.textContent = actifs ? ` · ${actifs}` : "";
+    transfersBtn.classList.toggle("has-sel", state.view === "transfers");
+}
+
+function setView(view) {
+    state.view = view;
+    clearInterval(transfersTimer);
+    transfersTimer = null;
+    if (view === "transfers") {
+        loadTransfers();
+        transfersTimer = setInterval(loadTransfers, 3000);
+        renderTransfers();
+    }
+    updateTransfersBadge();
+}
+
+if (transfersBtn) {
+    transfersBtn.addEventListener("click", () => {
+        setView(state.view === "transfers" ? "search" : "transfers");
+        if (state.view === "search") renderResults();
+    });
+}
+
+function renderTransfers() {
+    hideFacets();
+    observeMore(null);
+
+    if (!state.transfers.length) {
+        resultsBox.replaceChildren(el("div", { class: "state" },
+            el("span", { class: "emoji", text: "📥" }),
+            "Aucun transfert. Envoyez une release à qBittorrent depuis la recherche."));
+        return;
+    }
+
+    const total = state.transfers.reduce((n, t) => n + t.size, 0);
+    const dl = state.transfers.reduce((n, t) => n + t.dlspeed, 0);
+    const up = state.transfers.reduce((n, t) => n + t.upspeed, 0);
+    const meta = el("div", { class: "meta-row" },
+        el("span", {}, el("b", { text: String(state.transfers.length) }),
+            ` transfert${state.transfers.length > 1 ? "s" : ""}`,
+            el("span", { class: "muted", text: ` · ${formatSize(total)}` })),
+        el("span", { class: "meta-actions" },
+            el("span", { class: "muted", text: `↓ ${formatSpeed(dl)}  ↑ ${formatSpeed(up)}` })));
+
+    const head = el("tr", {},
+        el("th", { text: "Torrent" }),
+        el("th", { class: "num", text: "Taille" }),
+        el("th", { class: "num", text: "Ratio" }),
+        el("th", { class: "num", text: "Vitesse" }),
+        el("th", { class: "num", text: "" }));
+
+    const table = el("table", {},
+        el("thead", {}, head),
+        el("tbody", {}, ...state.transfers.map(renderTransferRow)));
+
+    resultsBox.replaceChildren(meta, el("div", { class: "table-wrap" }, table));
+}
+
+function renderTransferRow(t) {
+    const tr = el("tr");
+    const pct = Math.round(t.progress * 100);
+    const done = pct >= 100;
+
+    const nameCell = el("td", { class: "cell-title" });
+    nameCell.append(el("span", { class: "rel", title: t.name },
+        el("span", { class: "rel-name", text: t.name })));
+
+    const bar = el("div", { class: "prog" }, el("div", { class: "prog-fill" + (done ? " done" : "") }));
+    bar.firstChild.style.width = pct + "%";
+    const info = el("div", { class: "rel-meta" },
+        el("span", { class: "prog-pct", text: pct + " %" }),
+        el("span", { class: "sep", text: "·" }),
+        el("span", { text: TRANSFER_STATES[t.state] || t.state }));
+    if (t.category) info.append(el("span", { class: "sep", text: "·" }), el("span", { text: t.category }));
+    if (!done && t.eta) info.append(el("span", { class: "sep", text: "·" }),
+        el("span", { text: "reste " + formatEta(t.eta) }));
+    nameCell.append(bar, info);
+    tr.append(nameCell);
+
+    tr.append(el("td", { class: "num" }, t.sizeHuman));
+
+    // Le ratio dit si l'on a rendu ce qu'on a pris : c'est ce qui compte sur
+    // un tracker privé.
+    const rc = t.ratio >= 1 ? "s-good" : t.ratio >= 0.5 ? "s-mid" : "s-low";
+    tr.append(el("td", { class: "num" }, el("span", { class: "seed " + rc, text: t.ratio.toFixed(2) })));
+
+    tr.append(el("td", { class: "num" },
+        el("span", { class: "spd", text: `↓ ${formatSpeed(t.dlspeed)}` }),
+        el("span", { class: "spd up", text: `↑ ${formatSpeed(t.upspeed)}` })));
+
+    tr.append(el("td", { class: "num" }, renderTransferActions(t)));
+    return tr;
+}
+
+/**
+ * Actions d'un transfert. La suppression se fait en deux temps, sans boîte de
+ * dialogue : le choix reste dans la page. Il est mémorisé dans `pendingDelete`,
+ * sinon le rafraîchissement automatique l'effacerait avant qu'on puisse cliquer.
+ */
+function renderTransferActions(t) {
+    const wrap = el("div", { class: "actions" });
+
+    if (pendingDelete === t.hash) {
+        const only = el("button", { type: "button", class: "del-choice", text: "Retirer",
+            title: "Retirer de qBittorrent, garder les fichiers" });
+        only.addEventListener("click", () => transferAction(t.hash, "delete", false, only));
+
+        const both = el("button", { type: "button", class: "del-choice danger", text: "+ fichiers",
+            title: "Supprimer aussi les fichiers téléchargés" });
+        both.addEventListener("click", () => transferAction(t.hash, "delete", true, both));
+
+        const cancel = el("button", { type: "button", class: "act", title: "Annuler" });
+        cancel.append(svgIcon(ICONS.close));
+        cancel.addEventListener("click", () => { pendingDelete = null; renderTransfers(); });
+
+        wrap.append(only, both, cancel);
+        return wrap;
+    }
+
+    const running = !/^(paused|stopped)/.test(t.state);
+    wrap.append(makeBtn("act", running ? ICONS.pause : ICONS.play,
+        running ? "Arrêter" : "Relancer",
+        (btn) => transferAction(t.hash, running ? "stop" : "start", false, btn)));
+    wrap.append(makeBtn("act act-del", ICONS.trash, "Supprimer",
+        () => { pendingDelete = t.hash; renderTransfers(); }));
+    return wrap;
+}
+
+async function transferAction(hash, op, files, btn) {
+    pendingDelete = null;
+    btn.disabled = true;
+    btn.classList.add("busy");
+    const body = new URLSearchParams({ op, hash });
+    if (files) body.set("files", "1");
+    try {
+        const res = await fetch("transfers.php", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": CSRF },
+            body: body.toString(),
+        });
+        const data = await res.json().catch(() => ({}));
+        toast(res.ok && data.ok ? data.message : (data.error || "Échec de l'action"));
+    } catch (e) {
+        toast("Échec de l'action");
+    }
+    loadTransfers();
 }
 
 /* ==================================================================

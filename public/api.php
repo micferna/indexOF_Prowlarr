@@ -157,6 +157,41 @@ try {
         json_response(['indexers' => $client->indexers()]);
     }
 
+    // Transferts en cours : qBittorrent est la source de vérité, on ne duplique
+    // rien. Sert à la fois à la vue « Transferts » et au marquage des résultats
+    // déjà présents dans le client.
+    if ($action === 'transfers') {
+        if (!QbittorrentClient::isConfigured($config['qbit_url'])) {
+            json_response(['torrents' => [], 'qbit' => false]);
+        }
+        $qc = new QbittorrentClient(
+            $config['qbit_url'],
+            $config['qbit_user'],
+            $config['qbit_pass'],
+            $config['qbit_timeout'],
+        );
+        $torrents = [];
+        foreach ($qc->torrents() as $t) {
+            $size = (int) ($t['size'] ?? 0);
+            $torrents[] = [
+                'hash'      => (string) ($t['hash'] ?? ''),
+                'name'      => (string) ($t['name'] ?? ''),
+                'state'     => (string) ($t['state'] ?? ''),
+                'progress'  => round((float) ($t['progress'] ?? 0), 4),
+                'size'      => $size,
+                'sizeHuman' => format_size($size),
+                'ratio'     => round((float) ($t['ratio'] ?? 0), 2),
+                'dlspeed'   => (int) ($t['dlspeed'] ?? 0),
+                'upspeed'   => (int) ($t['upspeed'] ?? 0),
+                'eta'       => (int) ($t['eta'] ?? 0),
+                'category'  => (string) ($t['category'] ?? ''),
+                'seeds'     => (int) ($t['num_seeds'] ?? 0),
+                'peers'     => (int) ($t['num_leechs'] ?? 0),
+            ];
+        }
+        json_response(['torrents' => $torrents, 'qbit' => true]);
+    }
+
     if ($action === 'search') {
         // Mode découverte (Top) : requête vide autorisée, tri par seeders côté client.
         $top   = (string) ($_GET['top'] ?? '') === '1';
