@@ -75,9 +75,9 @@ echo '<?xml version="1.0" encoding="UTF-8"?>', "\n";
 ?>
 <rss version="2.0">
   <channel>
-    <title>indexOF · <?php echo e((string) $search['name']); ?></title>
-    <link><?php echo e($base . '/index.php'); ?></link>
-    <description>Recherche enregistrée « <?php echo e((string) $search['name']); ?> » — <?php echo count($found['results']); ?> résultat(s)</description>
+    <title>indexOF · <?php echo xml_text((string) $search['name']); ?></title>
+    <link><?php echo xml_text($base . '/index.php'); ?></link>
+    <description>Recherche enregistrée « <?php echo xml_text((string) $search['name']); ?> » — <?php echo count($found['results']); ?> résultat(s)</description>
     <language>fr</language>
     <lastBuildDate><?php echo gmdate('D, d M Y H:i:s') . ' GMT'; ?></lastBuildDate>
 <?php foreach ($found['results'] as $r): ?>
@@ -87,7 +87,7 @@ echo '<?xml version="1.0" encoding="UTF-8"?>', "\n";
     $enclosure = '';
     if (!empty($r['dl']['token'])) {
         $enclosure = $base . '/download_torrent.php?token=' . rawurlencode((string) $r['dl']['token'])
-            . '&amp;feed=' . rawurlencode((string) $search['token']);
+            . '&feed=' . rawurlencode((string) $search['token']);
     } elseif (!empty($r['magnet'])) {
         $enclosure = (string) $r['magnet'];
     }
@@ -97,17 +97,17 @@ echo '<?xml version="1.0" encoding="UTF-8"?>', "\n";
     $published = strtotime((string) $r['publishDate']);
 ?>
     <item>
-      <title><?php echo e((string) $r['title']); ?></title>
-      <link><?php echo e($r['infoUrl'] !== '#' ? (string) $r['infoUrl'] : $enclosure); ?></link>
-      <guid isPermaLink="false"><?php echo e(sha1((string) $r['title'] . '|' . (string) $r['indexer'])); ?></guid>
+      <title><?php echo xml_text((string) $r['title']); ?></title>
+      <link><?php echo xml_text($r['infoUrl'] !== '#' ? (string) $r['infoUrl'] : $enclosure); ?></link>
+      <guid isPermaLink="false"><?php echo xml_text(sha1((string) $r['title'] . '|' . (string) $r['indexer'])); ?></guid>
       <pubDate><?php echo gmdate('D, d M Y H:i:s', $published !== false ? $published : time()) . ' GMT'; ?></pubDate>
-      <description><?php echo e(sprintf(
+      <description><?php echo xml_text(sprintf(
           '%s · %s · %d seeders',
           (string) $r['indexer'],
           (string) $r['sizeHuman'],
           (int) $r['seeders']
       )); ?></description>
-      <enclosure url="<?php echo $enclosure; ?>" length="<?php echo (int) $r['size']; ?>" type="application/x-bittorrent"/>
+      <enclosure url="<?php echo xml_text($enclosure); ?>" length="<?php echo (int) $r['size']; ?>" type="application/x-bittorrent"/>
     </item>
 <?php endforeach; ?>
   </channel>

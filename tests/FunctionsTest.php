@@ -103,6 +103,43 @@ final class FunctionsTest extends TestCase
         $this->assertNull(open_url('', $secret));
     }
 
+    /**
+     * Les titres et magnets viennent des trackers. Sans échappement, un magnet
+     * contenant un guillemet fermait l'attribut `url` du flux RSS et injectait
+     * un <item> entier — que le client d'un abonné aurait téléchargé.
+     */
+    public function testXmlTextBlocksAttributeBreakout(): void
+    {
+        $attaque = 'magnet:?xt=urn:btih:abc"/><item><enclosure url="http://pirate.example/evil.torrent"/></item><enclosure url="x';
+
+        $sortie = xml_text($attaque);
+        $this->assertStringNotContainsString('"', $sortie);
+        $this->assertStringNotContainsString('<', $sortie);
+
+        $doc = simplexml_load_string('<channel><enclosure url="' . $sortie . '"/></channel>');
+        $this->assertNotFalse($doc, 'le flux doit rester analysable');
+        $this->assertCount(0, $doc->item, 'aucun item ne doit pouvoir être injecté');
+    }
+
+    /**
+     * Les caractères de contrôle sont interdits en XML 1.0 même échappés : un
+     * seul dans un titre rendrait le flux illisible pour tous les abonnés.
+     */
+    public function testXmlTextStripsCharactersIllegalInXml(): void
+    {
+        $titre = "Release\x07Name\x00Suite";
+
+        $this->assertFalse(
+            @simplexml_load_string('<a>' . e($titre) . '</a>'),
+            'e() seul ne suffit pas'
+        );
+        $this->assertNotFalse(simplexml_load_string('<a>' . xml_text($titre) . '</a>'));
+
+        // Les caractères légaux, eux, sont conservés.
+        $this->assertSame('Ligne1' . "\n" . 'Ligne2', xml_text('Ligne1' . "\n" . 'Ligne2'));
+        $this->assertSame('Éàü — ✓', xml_text('Éàü — ✓'));
+    }
+
     public function testSealTokenExpires(): void
     {
         $secret = str_repeat('b', 32);

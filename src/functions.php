@@ -82,6 +82,21 @@ function e(?string $value): string
 }
 
 /**
+ * Prépare une valeur pour un document XML.
+ *
+ * Les titres et les magnets viennent des trackers : n'importe qui peut y placer
+ * ce qu'il veut. `e()` neutralise les guillemets et les chevrons, mais pas les
+ * caractères de contrôle, qui sont **interdits** en XML 1.0 même échappés — un
+ * seul suffit à rendre un flux illisible pour tous ses abonnés. On les retire
+ * avant d'échapper.
+ */
+function xml_text(?string $value): string
+{
+    $clean = preg_replace('/[^\x09\x0A\x0D\x20-\x{10FFFF}]/u', '', $value ?? '');
+    return e($clean === null ? '' : $clean);
+}
+
+/**
  * Renvoie l'URL si son schéma est autorisé, sinon '#'.
  * Empêche l'injection de liens `javascript:` / `data:` (XSS).
  *
