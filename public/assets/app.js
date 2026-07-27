@@ -794,8 +794,8 @@ function makeBtn(cls, icon, title, onClick) {
     return b;
 }
 
-async function copyText(text) {
-    try { await navigator.clipboard.writeText(text); toast("Magnet copié"); }
+async function copyText(text, message = "Magnet copié") {
+    try { await navigator.clipboard.writeText(text); toast(message); }
     catch (e) { toast("Copie impossible"); }
 }
 
@@ -1284,9 +1284,19 @@ function renderSaved() {
         const run = el("button", { type: "button", class: "saved-run", text: s.name,
             title: s.query ? `Rechercher « ${s.query} »` : "Derniers uploads" });
         run.addEventListener("click", () => runSaved(s));
+
+        // Le flux permet à qBittorrent de récupérer les nouveautés tout seul.
+        const feed = el("button", { type: "button", class: "saved-del", text: "RSS",
+            title: "Copier l'adresse du flux (à coller dans qBittorrent → RSS)" });
+        feed.addEventListener("click", () => {
+            const url = new URL("rss.php", location.href);
+            url.searchParams.set("t", s.token);
+            copyText(url.toString(), "Adresse du flux copiée");
+        });
+
         const del = el("button", { type: "button", class: "saved-del", text: "✕", title: "Supprimer" });
         del.addEventListener("click", () => deleteSaved(s.id));
-        chip.append(run, del);
+        chip.append(run, feed, del);
         return chip;
     }));
 }

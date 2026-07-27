@@ -92,6 +92,33 @@ final class StoreTest extends TestCase
         $this->assertSame([], $store->searches());
     }
 
+    public function testFeedTokenIsGeneratedAndResolves(): void
+    {
+        $store = new Store($this->file);
+        $id = $store->saveSearch([
+            'name' => 'Flux', 'query' => 'dune', 'days' => 0,
+            'cats' => '', 'trackers' => '', 'safe' => true,
+        ]);
+        $this->assertGreaterThan(0, $id);
+
+        $token = (string) $store->searches()[0]['token'];
+        $this->assertMatchesRegularExpression('/^[a-f0-9]{32}$/', $token);
+
+        $found = $store->searchByToken($token);
+        $this->assertNotNull($found);
+        $this->assertSame('dune', $found['query']);
+        $this->assertTrue($store->feedTokenExists($token));
+
+        // Un jeton mal formé ou inconnu ne doit rien révéler.
+        $this->assertNull($store->searchByToken('pas-un-jeton'));
+        $this->assertNull($store->searchByToken(str_repeat('0', 32)));
+        $this->assertFalse($store->feedTokenExists(''));
+
+        // Supprimer la recherche révoque le flux.
+        $store->deleteSearch($id);
+        $this->assertFalse($store->feedTokenExists($token));
+    }
+
     public function testUnavailableStoreDegradesInsteadOfThrowing(): void
     {
         // Chemin impossible à créer : l'application doit continuer de tourner.
@@ -105,6 +132,8 @@ final class StoreTest extends TestCase
             'name' => 'x', 'query' => '', 'days' => 0,
             'cats' => '', 'trackers' => '', 'safe' => true,
         ]));
+        $this->assertNull($store->searchByToken(str_repeat('a', 32)));
+        $this->assertFalse($store->feedTokenExists(str_repeat('a', 32)));
         // Ne doit lever aucune exception.
         $store->recordSend('Titre', 'Indexeur', 'qbit');
         $store->deleteSearch(1);

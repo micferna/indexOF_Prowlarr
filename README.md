@@ -67,7 +67,8 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
   envoyer à qBittorrent avec choix de la catégorie, ou pousser la release vers
   Sonarr / Radarr / Lidarr / Readarr.
 - **Recherches enregistrées** : mettez de côté une requête et ses filtres, rejouez-la
-  d'un clic depuis le panneau Filtres.
+  d'un clic depuis le panneau Filtres — et **abonnez qBittorrent à son flux RSS**
+  pour qu'il récupère les nouveautés sans que vous ouvriez l'application.
 - **« Déjà pris »** : les releases que vous avez déjà envoyées sont marquées dans les
   résultats, avec la date et la destination. Le rapprochement se fait sur le titre
   enregistré au moment de l'envoi, pas sur le nom que le client a pu réécrire.
@@ -110,6 +111,22 @@ Renseignez `QBITTORRENT_URL` (ex. `http://qbittorrent:8081`) pour faire apparaî
 N'utilisez **pas** le contournement d'authentification par sous-réseau (*Options → Web UI → Bypass authentication for clients in whitelisted IP subnets*) : il ouvre la Web UI — donc le contrôle total du client BitTorrent, y compris l'exécution d'un programme externe — à tout ce qui atteint le réseau Docker. La Web UI doit exiger un mot de passe, avec *CSRF protection* et *Host header validation* actives.
 
 > Le port publié doit être identique au port interne (`WEBUI_PORT`) : qBittorrent valide le port de l'en-tête `Host` et rejette tout le reste.
+
+## Flux RSS
+
+Chaque recherche enregistrée expose un flux. Le bouton **RSS** du panneau Filtres
+copie son adresse ; collez-la dans qBittorrent (*Vue RSS → Nouvel abonnement*), et
+il ira chercher les nouveautés tout seul.
+
+Un lecteur RSS ne peut pas ouvrir de session : l'accès repose sur le jeton secret
+présent dans l'URL, propre à chaque recherche. Supprimer la recherche révoque le
+flux. Le flux ne contient jamais l'URL Prowlarr réelle : les pièces jointes
+pointent vers le proxy de téléchargement, avec un lien scellé.
+
+> **Adresse à utiliser depuis un conteneur.** Le bouton copie l'adresse telle que
+> vous voyez l'application (`http://localhost:8080/rss.php?t=…`). Un qBittorrent
+> qui tourne dans le même Docker Compose ne joint pas `localhost` : remplacez
+> l'hôte par le nom du service, soit `http://web/rss.php?t=…`.
 
 ## Sonarr, Radarr et consorts
 

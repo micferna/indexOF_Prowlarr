@@ -81,9 +81,21 @@ final class Store
                 cats       TEXT NOT NULL DEFAULT "",
                 trackers   TEXT NOT NULL DEFAULT "",
                 safe       INTEGER NOT NULL DEFAULT 1,
+                token      TEXT NOT NULL DEFAULT "",
                 created_at INTEGER NOT NULL
             )'
         );
+
+        // Bases créées avant l'ajout des flux : on complète sans les recréer.
+        $cols = [];
+        $info = $pdo->query('PRAGMA table_info(searches)');
+        foreach ($info === false ? [] : $info->fetchAll() as $c) {
+            $cols[] = (string) ($c['name'] ?? '');
+        }
+        if (!in_array('token', $cols, true)) {
+            $pdo->exec('ALTER TABLE searches ADD COLUMN token TEXT NOT NULL DEFAULT ""');
+        }
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_searches_token ON searches (token)');
     }
 
     /** Clé de rapprochement : le titre débarrassé de sa ponctuation et de sa casse. */
@@ -190,12 +202,12 @@ final class Store
         }
         try {
             $stmt = $pdo->prepare(
-                'INSERT INTO searches (name, query, days, cats, trackers, safe, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)'
+                'INSERT INTO searches (name, query, days, cats, trackers, safe, token, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $s['name'], $s['query'], $s['days'], $s['cats'], $s['trackers'],
-                $s['safe'] ? 1 : 0, time(),
+                $s['safe'] ? 1 : 0, bin2hex(random_bytes(16)), time(),
             ]);
             return (int) $pdo->lastInsertId();
         } catch (Throwable $e) {
@@ -213,13 +225,43 @@ final class Store
         }
         try {
             $stmt = $pdo->query(
-                'SELECT id, name, query, days, cats, trackers, safe, created_at
+                'SELECT id, name, query, days, cats, trackers, safe, token, created_at
                  FROM searches ORDER BY name COLLATE NOCASE'
             );
             return $stmt === false ? [] : $stmt->fetchAll();
         } catch (Throwable $e) {
             return [];
         }
+    }
+
+    /**
+     * Recherche désignée par son jeton de flux, ou null.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function searchByToken(string $token): ?array
+    {
+        $pdo = $this->db();
+        if ($pdo === null || preg_match('/^[a-f0-9]{32}$/', $token) !== 1) {
+            return null;
+        }
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT id, name, query, days, cats, trackers, safe, token
+                 FROM searches WHERE token = ? LIMIT 1'
+            );
+            $stmt->execute([$token]);
+            $row = $stmt->fetch();
+            return is_array($row) ? $row : null;
+        } catch (Throwable $e) {
+            return null;
+        }
+    }
+
+    /** Un jeton de flux valide existe-t-il ? Sert à autoriser un téléchargement hors session. */
+    public function feedTokenExists(string $token): bool
+    {
+        return $this->searchByToken($token) !== null;
     }
 
     public function deleteSearch(int $id): void

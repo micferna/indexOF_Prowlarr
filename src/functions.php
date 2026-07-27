@@ -56,6 +56,25 @@ function asset(string $path): string
     return $path . '?v=' . $version;
 }
 
+/**
+ * URL de base de l'application, déduite de la requête.
+ *
+ * Sert à écrire des liens absolus dans les flux RSS : un lecteur externe n'a
+ * aucune notion de chemin relatif. L'en-tête Host vient du client, on le
+ * restreint donc à ce qui peut réellement composer un nom d'hôte.
+ */
+function feed_base_url(): string
+{
+    $https = (($_SERVER['HTTPS'] ?? '') !== '' && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    $host = (string) ($_SERVER['HTTP_HOST'] ?? '');
+    if (preg_match('/^[A-Za-z0-9.\-:\[\]]{1,255}$/', $host) !== 1) {
+        $host = 'localhost';
+    }
+    $dir = rtrim(str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '/'))), '/');
+    return ($https ? 'https://' : 'http://') . $host . $dir;
+}
+
 /** Échappement HTML systématique (ENT_QUOTES couvre " et '). */
 function e(?string $value): string
 {

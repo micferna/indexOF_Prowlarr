@@ -15,13 +15,24 @@ declare(strict_types=1);
 require_once __DIR__ . '/../src/config.php';
 require_once __DIR__ . '/../src/functions.php';
 require_once __DIR__ . '/../src/auth.php';
+require_once __DIR__ . '/../src/Store.php';
 
 const MAX_BYTES     = 25 * 1024 * 1024; // 25 Mo
 const MAX_REDIRECTS = 3;
 
 $config = load_config();
 
-require_auth($config, 'html');
+// Un lecteur RSS ne peut pas ouvrir de session : le jeton du flux tient lieu
+// d'autorisation. Il ne donne accès qu'à ce que le flux propose déjà, et le
+// lien lui-même reste scellé par le serveur.
+$feed = (string) ($_GET['feed'] ?? '');
+if ($feed !== '') {
+    if (!(new Store($config['db_file']))->feedTokenExists($feed)) {
+        fail(403, 'Flux inconnu.');
+    }
+} else {
+    require_auth($config, 'html');
+}
 
 security_headers();
 
