@@ -658,6 +658,9 @@ a.rel:hover { color: var(--amber); }
 .saved-del.on:hover { color: var(--amber); background: var(--amber-soft); }
 
 .saved-add { display: flex; gap: 6px; margin-top: 8px; }
+.user-idx { margin-top: 6px; }
+.user-idx-label { margin-top: 8px; font-size: 11.5px; color: var(--faint); }
+
 .users-add { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px 14px; }
 .users-add .saved-input { flex: 1 1 180px; max-width: 260px; }
 .saved-input {

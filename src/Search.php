@@ -115,7 +115,11 @@ function map_result(array $r, string $secret): array
 /**
  * Exécute une recherche complète et renvoie les résultats prêts à l'affichage.
  *
- * @param array{query?:string,top?:bool,days?:int,cats?:string,trackers?:string,safe?:bool} $params
+ * `allow` borne les indexeurs interrogeables : null = aucune restriction, un
+ * tableau = uniquement ceux-là. C'est une frontière de sécurité — la sélection
+ * demandée par le client est INTERSECTÉE avec elle, jamais réunie.
+ *
+ * @param array{query?:string,top?:bool,days?:int,cats?:string,trackers?:string,safe?:bool,allow?:array<int,int>|null,user?:string|null} $params
  * @param array<string,mixed> $config
  * @return array{query:string,total:int,count:int,capped:bool,results:array<int,array<string,mixed>>}
  */
@@ -135,6 +139,19 @@ function perform_search(ProwlarrClient $client, ?Store $store, array $config, ar
 
     $trackers   = parse_id_list((string) ($params['trackers'] ?? ''));
     $categories = parse_id_list((string) ($params['cats'] ?? ''));
+
+    // Cloisonnement : ce que le client demande est réduit à ce qui lui est
+    // permis. Une liste autorisée vide n'ouvre rien — elle ferme tout.
+    $allow = $params['allow'] ?? null;
+    if (is_array($allow)) {
+        if ($allow === []) {
+            return $empty;
+        }
+        $trackers = $trackers === [] ? $allow : array_values(array_intersect($trackers, $allow));
+        if ($trackers === []) {
+            return $empty;
+        }
+    }
 
     // Un indexeur inconnu fait échouer toute la recherche côté Prowlarr : on
     // restreint à la liste réelle (en cache). Si plus rien ne subsiste, la
@@ -171,7 +188,7 @@ function perform_search(ProwlarrClient $client, ?Store $store, array $config, ar
     // Marquage des releases déjà envoyées : rapprochement sur le titre que NOUS
     // avons enregistré, donc exact — contrairement au nom que le client de
     // téléchargement peut avoir réécrit.
-    $sent = $store !== null ? $store->sentIndex() : [];
+    $sent = $store !== null ? $store->sentIndex(2000, $params['user'] ?? null) : [];
     $results = array_map(
         static function (array $r) use ($config, $sent): array {
             $mapped = map_result($r, $config['secret']);

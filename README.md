@@ -199,6 +199,29 @@ minimum, haché) et l'historique retient qui a envoyé quoi.
 Un compte nommé ne peut ni créer ni supprimer de compte : sans cette limite,
 n'importe quel utilisateur pourrait s'octroyer un accès ou évincer les autres.
 
+### Cloisonnement par indexeur
+
+**Par défaut, un compte utilise vos indexeurs — donc vos identifiants de
+tracker.** Sur un tracker privé, cela signifie que ses téléchargements comptent
+sur votre ratio et que ses manquements retombent sur votre compte.
+
+Pour l'éviter, attribuez à chaque personne ses propres indexeurs :
+
+1. dans **Prowlarr**, ajoutez le tracker une fois par personne, avec *ses*
+   identifiants (« YggTorrent (alice) », « YggTorrent (bob) ») ;
+2. dans la vue **Comptes**, cochez les indexeurs autorisés pour chaque compte.
+
+Le compte ne voit alors que ces indexeurs, ne peut interroger qu'eux, et ses
+téléchargements passent par ses propres identifiants. Tout coché revient à
+« aucune restriction ». Partager un tracker devient un choix explicite,
+indexeur par indexeur.
+
+La restriction s'applique côté serveur sur **tous** les chemins : recherche,
+liste des indexeurs, statistiques, flux RSS et veille Discord — y compris ceux
+qui s'exécutent sans session, où c'est le propriétaire de la recherche qui
+fait autorité. Forcer des identifiants d'indexeur dans l'URL ne contourne rien :
+la demande est intersectée avec la liste autorisée, jamais réunie.
+
 ## Sécurité
 
 - **Authentification obligatoire** : `APP_PASSWORD` (session + CSRF). Sans lui, l'app refuse de démarrer, à moins de poser explicitement `AUTH_DISABLED=1`. Comptes nommés en option, mots de passe hachés, gestion réservée à l'administrateur.

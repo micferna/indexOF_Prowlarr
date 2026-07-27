@@ -55,6 +55,25 @@ if ($op === 'delete') {
     json_response(['ok' => true, 'message' => 'Compte supprimé']);
 }
 
+if ($op === 'indexers') {
+    $id = (int) ($_POST['id'] ?? 0);
+    if ($id <= 0) {
+        json_response(['error' => 'Compte invalide.'], 400);
+    }
+    // Liste vide = aucune restriction (le compte voit tous les indexeurs).
+    $ids = array_map('intval', array_filter(explode(',', (string) ($_POST['indexers'] ?? ''))));
+    // On rend compte de ce qui est ENREGISTRÉ, pas de ce qui a été demandé :
+    // les identifiants invalides sont écartés, et l'administrateur doit voir la
+    // restriction réelle.
+    $retenus = $store->setUserIndexers($id, $ids);
+    json_response([
+        'ok' => true,
+        'message' => $retenus === []
+            ? 'Accès à tous les indexeurs'
+            : count($retenus) . ' indexeur(s) autorisé(s)',
+    ]);
+}
+
 if ($op !== 'add') {
     json_response(['error' => 'Action inconnue.'], 400);
 }

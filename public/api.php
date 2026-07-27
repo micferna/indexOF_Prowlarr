@@ -41,6 +41,19 @@ $client = new ProwlarrClient(
 
 $store = new Store($config['db_file']);
 
+// Cloisonnement : la liste des indexeurs autorisés pour la session en cours.
+// null = aucune restriction (administrateur, ou compte sans liste définie).
+// Elle est appliquée à TOUS les points qui atteignent Prowlarr — recherche,
+// liste d'indexeurs, statistiques — pas seulement au premier.
+$me = current_user();
+$allow = $store->userIndexers($me);
+$scope = is_admin($config) ? null : $me;
+
+/** Un indexeur est-il visible pour la session en cours ? */
+$visible = static function (int $id) use ($allow): bool {
+    return $allow === null || in_array($id, $allow, true);
+};
+
 $action = (string) ($_GET['action'] ?? 'search');
 
 try {
@@ -49,9 +62,11 @@ try {
         $connected = false;
         $errors = [];
         try {
-            $count = count($client->indexers());
+            $mine = array_filter($client->indexers(), static fn (array $i): bool => $visible((int) $i['id']));
+            $count = count($mine);
             $connected = true;
-            $errors = $client->failingIndexers();
+            $noms = array_column($mine, 'name');
+            $errors = array_values(array_intersect($client->failingIndexers(), $noms));
         } catch (Throwable $e) {
             $connected = false;
         }
@@ -88,11 +103,11 @@ try {
     }
 
     if ($action === 'searches') {
-        json_response(['searches' => $store->searches()]);
+        json_response(['searches' => $store->searches($scope)]);
     }
 
     if ($action === 'history') {
-        json_response(['history' => $store->history()]);
+        json_response(['history' => $store->history(200, $scope)]);
     }
 
     // Santé des indexeurs : latence, volume, échecs, et lesquels sont
@@ -105,9 +120,20 @@ try {
             error_log('[indexof] statut indexeurs indisponible : ' . $e->getMessage());
         }
 
+        $autorises = null;
+        if ($allow !== null) {
+            $autorises = array_column(array_filter(
+                $client->indexers(),
+                static fn (array $i): bool => $visible((int) $i['id'])
+            ), 'name');
+        }
+
         $rows = [];
         foreach ($client->indexerStats(30) as $st) {
             $name = (string) ($st['indexerName'] ?? '');
+            if ($autorises !== null && !in_array($name, $autorises, true)) {
+                continue;
+            }
             $queries = (int) ($st['numberOfQueries'] ?? 0) + (int) ($st['numberOfRssQueries'] ?? 0);
             $failed  = (int) ($st['numberOfFailedQueries'] ?? 0) + (int) ($st['numberOfFailedRssQueries'] ?? 0);
             $rows[] = [
@@ -159,7 +185,10 @@ try {
     }
 
     if ($action === 'indexers') {
-        json_response(['indexers' => $client->indexers()]);
+        json_response(['indexers' => array_values(array_filter(
+            $client->indexers(),
+            static fn (array $i): bool => $visible((int) $i['id'])
+        ))]);
     }
 
     // Transferts en cours : qBittorrent est la source de vérité, on ne duplique
@@ -205,6 +234,8 @@ try {
             'cats'     => (string) ($_GET['cats'] ?? ''),
             'trackers' => (string) ($_GET['trackers'] ?? ''),
             'safe'     => ((string) ($_GET['safe'] ?? '1')) !== '0',
+            'allow'    => $allow,
+            'user'     => $scope,
         ]));
     }
 

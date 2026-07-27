@@ -53,6 +53,10 @@ $client = new ProwlarrClient(
 );
 
 try {
+    // Un flux s'exécute sans session : c'est le propriétaire de la recherche qui
+    // détermine les indexeurs interrogeables. Sans ça, créer un flux suffirait à
+    // contourner son propre cloisonnement.
+    $proprietaire = (string) ($search['owner'] ?? '');
     $found = perform_search($client, $store, $config, [
         'query'    => (string) $search['query'],
         'top'      => ((string) $search['query']) === '',
@@ -60,6 +64,8 @@ try {
         'cats'     => (string) $search['cats'],
         'trackers' => (string) $search['trackers'],
         'safe'     => ((int) $search['safe']) !== 0,
+        'allow'    => $store->userIndexers($proprietaire),
+        'user'     => $proprietaire !== '' ? $proprietaire : null,
     ]);
 } catch (Throwable $e) {
     error_log('[indexof] rss error: ' . $e->getMessage());

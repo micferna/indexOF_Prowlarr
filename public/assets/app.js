@@ -1255,6 +1255,33 @@ function renderUsers() {
         tr.append(el("td", { class: "num" },
             new Date(u.created_at * 1000).toLocaleDateString("fr-FR")));
 
+        // Indexeurs autorisés : la case décochée n'est pas cosmétique, elle
+        // empêche réellement ce compte d'interroger le tracker — et donc
+        // d'utiliser les identifiants d'un autre.
+        const permis = new Set(String(u.indexers || "").split(",").map(Number).filter(Boolean));
+        const liste = el("div", { class: "chips user-idx" });
+        for (const ix of lastIndexers) {
+            const chip = el("button", { type: "button", class: "chip" + (permis.size === 0 || permis.has(ix.id) ? " active" : "") },
+                el("span", { class: "maskable", text: ix.name }));
+            chip.title = permis.size === 0 ? "Aucune restriction : tous les indexeurs" : "Autoriser / retirer";
+            chip.addEventListener("click", async () => {
+                const courant = permis.size === 0 ? new Set(lastIndexers.map((i) => i.id)) : new Set(permis);
+                courant.has(ix.id) ? courant.delete(ix.id) : courant.add(ix.id);
+                // Tout coché revient à « aucune restriction ».
+                const tous = courant.size === lastIndexers.length;
+                const { ok, data } = await postForm("users.php", {
+                    op: "indexers", id: u.id, indexers: tous ? "" : [...courant].join(","),
+                });
+                toast(ok ? data.message : (data.error || "Échec"));
+                loadUsers();
+            });
+            liste.append(chip);
+        }
+        cell.append(el("div", { class: "user-idx-label", text: permis.size === 0
+            ? "Tous les indexeurs — ce compte utilise vos identifiants"
+            : `${permis.size} indexeur(s) autorisé(s)` }));
+        cell.append(liste);
+
         const actions = el("div", { class: "actions" });
         const suppr = makeBtn("act act-del", ICONS.trash, "Supprimer ce compte", async (btn) => {
             btn.disabled = true;

@@ -231,6 +231,73 @@ final class StoreTest extends TestCase
         $this->assertSame('alice', $history[1]['user']);
     }
 
+    /**
+     * Le cloisonnement par indexeur est une frontière de sécurité : sur un
+     * tracker privé, laisser quelqu'un chercher avec les identifiants d'un
+     * autre lui fait porter le ratio et les sanctions.
+     */
+    public function testIndexerRestrictionIsSanitisedAndReported(): void
+    {
+        $store = new Store($this->file);
+        $store->addUser('alice', 'motdepasse-tres-long');
+        $id = $store->users()[0]['id'];
+
+        // Sans liste, aucune restriction.
+        $this->assertNull($store->userIndexers('alice'));
+
+        // Les valeurs non numériques sont écartées, et le retour dit ce qui a
+        // réellement été retenu — pas ce qui a été demandé.
+        $retenus = $store->setUserIndexers($id, array_map('intval', ['1', '../etc', 'DROP', '0', '-4']));
+        $this->assertSame([1], $retenus);
+        $this->assertSame([1], $store->userIndexers('alice'));
+
+        // Liste vidée = retour à l'accès complet.
+        $this->assertSame([], $store->setUserIndexers($id, []));
+        $this->assertNull($store->userIndexers('alice'));
+    }
+
+    public function testUnknownUserGetsNothingNotEverything(): void
+    {
+        $store = new Store($this->file);
+
+        // Compte inexistant (supprimé pendant sa session) : on ferme tout.
+        // Renvoyer null ici ouvrirait l'accès à tous les indexeurs.
+        $this->assertSame([], $store->userIndexers('fantome'));
+
+        // L'administrateur, lui, n'a pas de restriction.
+        $this->assertNull($store->userIndexers(''));
+    }
+
+    public function testSearchesAreScopedToTheirOwner(): void
+    {
+        $store = new Store($this->file);
+        $store->saveSearch(['name' => 'A elle', 'query' => 'x', 'days' => 0,
+            'cats' => '', 'trackers' => '', 'safe' => true, 'owner' => 'alice']);
+        $store->saveSearch(['name' => 'A lui', 'query' => 'y', 'days' => 0,
+            'cats' => '', 'trackers' => '', 'safe' => true, 'owner' => '']);
+
+        $this->assertCount(2, $store->searches(), 'sans portée, tout est visible (administrateur)');
+        $this->assertSame(['A elle'], array_column($store->searches('alice'), 'name'));
+        $this->assertSame(['A lui'], array_column($store->searches(''), 'name'));
+
+        // Le propriétaire suit le jeton du flux : c'est lui qui décide des
+        // indexeurs interrogés, le flux s'exécutant sans session.
+        $token = (string) $store->searches('alice')[0]['token'];
+        $this->assertSame('alice', $store->searchByToken($token)['owner']);
+    }
+
+    public function testHistoryIsScopedToItsUser(): void
+    {
+        $store = new Store($this->file);
+        $store->recordSend('A', 'T', 'qbit', '', 'alice');
+        $store->recordSend('B', 'T', 'qbit', '', '');
+
+        $this->assertCount(2, $store->history(), 'sans portée, tout est visible');
+        $this->assertSame(['A'], array_column($store->history(200, 'alice'), 'title'));
+        $this->assertArrayHasKey(Store::titleKey('A'), $store->sentIndex(2000, 'alice'));
+        $this->assertArrayNotHasKey(Store::titleKey('B'), $store->sentIndex(2000, 'alice'));
+    }
+
     public function testUnavailableStoreDegradesInsteadOfThrowing(): void
     {
         // Chemin impossible à créer : l'application doit continuer de tourner.
@@ -252,6 +319,7 @@ final class StoreTest extends TestCase
         $this->assertNotNull($store->addUser('alice', 'motdepasse-tres-long'));
         $this->assertNull($store->checkUser('alice', 'motdepasse-tres-long'));
         $store->deleteUser(1);
+        $this->assertSame([], $store->setUserIndexers(1, [1]));
         $this->assertSame([], $store->notifiedSearches());
         $store->setNotify(1, true);
         // Ne doit lever aucune exception.

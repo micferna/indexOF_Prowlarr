@@ -94,6 +94,7 @@ final class Store
                 safe       INTEGER NOT NULL DEFAULT 1,
                 token      TEXT NOT NULL DEFAULT "",
                 notify     INTEGER NOT NULL DEFAULT 0,
+                owner      TEXT NOT NULL DEFAULT "",
                 created_at INTEGER NOT NULL
             )'
         );
@@ -110,6 +111,12 @@ final class Store
         if (!in_array('notify', $cols, true)) {
             $pdo->exec('ALTER TABLE searches ADD COLUMN notify INTEGER NOT NULL DEFAULT 0');
         }
+        // Une recherche enregistrée doit savoir à qui elle appartient : son flux
+        // RSS s'exécute sans session, c'est le propriétaire qui détermine les
+        // indexeurs autorisés. Sans ça, un flux contournerait le cloisonnement.
+        if (!in_array('owner', $cols, true)) {
+            $pdo->exec('ALTER TABLE searches ADD COLUMN owner TEXT NOT NULL DEFAULT ""');
+        }
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_searches_token ON searches (token)');
 
         // Comptes nommés. Facultatifs : APP_PASSWORD reste toujours valable et
@@ -121,9 +128,20 @@ final class Store
                 name       TEXT NOT NULL UNIQUE,
                 pass_hash  TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
-                last_login INTEGER NOT NULL DEFAULT 0
+                last_login INTEGER NOT NULL DEFAULT 0,
+                indexers   TEXT NOT NULL DEFAULT ""
             )'
         );
+
+        // Bases créées avant le cloisonnement par indexeur.
+        $ucols = [];
+        $uinfo = $pdo->query('PRAGMA table_info(users)');
+        foreach ($uinfo === false ? [] : $uinfo->fetchAll() as $c) {
+            $ucols[] = (string) ($c['name'] ?? '');
+        }
+        if (!in_array('indexers', $ucols, true)) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN indexers TEXT NOT NULL DEFAULT ""');
+        }
 
         // Releases déjà signalées, pour ne notifier que la nouveauté.
         $pdo->exec(
@@ -165,19 +183,29 @@ final class Store
      *
      * @return array<string,array{at:int,target:string}>
      */
-    public function sentIndex(int $limit = 2000): array
+    public function sentIndex(int $limit = 2000, ?string $user = null): array
     {
         $pdo = $this->db();
         if ($pdo === null) {
             return [];
         }
         try {
-            $stmt = $pdo->query(
-                'SELECT title_key, MAX(created_at) AS at, target
-                 FROM sends GROUP BY title_key
-                 ORDER BY at DESC LIMIT ' . max(1, $limit)
-            );
-            $rows = $stmt === false ? [] : $stmt->fetchAll();
+            if ($user === null) {
+                $stmt = $pdo->query(
+                    'SELECT title_key, MAX(created_at) AS at, target
+                     FROM sends GROUP BY title_key
+                     ORDER BY at DESC LIMIT ' . max(1, $limit)
+                );
+                $rows = $stmt === false ? [] : $stmt->fetchAll();
+            } else {
+                $stmt = $pdo->prepare(
+                    'SELECT title_key, MAX(created_at) AS at, target
+                     FROM sends WHERE user = ? GROUP BY title_key
+                     ORDER BY at DESC LIMIT ' . max(1, $limit)
+                );
+                $stmt->execute([$user]);
+                $rows = $stmt->fetchAll();
+            }
         } catch (Throwable $e) {
             return [];
         }
@@ -197,18 +225,26 @@ final class Store
      *
      * @return array<int,array<string,mixed>>
      */
-    public function history(int $limit = 200): array
+    public function history(int $limit = 200, ?string $user = null): array
     {
         $pdo = $this->db();
         if ($pdo === null) {
             return [];
         }
         try {
-            $stmt = $pdo->query(
+            if ($user === null) {
+                $stmt = $pdo->query(
+                    'SELECT id, title, indexer, target, hash, user, created_at
+                     FROM sends ORDER BY created_at DESC, id DESC LIMIT ' . max(1, $limit)
+                );
+                return $stmt === false ? [] : $stmt->fetchAll();
+            }
+            $stmt = $pdo->prepare(
                 'SELECT id, title, indexer, target, hash, user, created_at
-                 FROM sends ORDER BY created_at DESC, id DESC LIMIT ' . max(1, $limit)
+                 FROM sends WHERE user = ? ORDER BY created_at DESC, id DESC LIMIT ' . max(1, $limit)
             );
-            return $stmt === false ? [] : $stmt->fetchAll();
+            $stmt->execute([$user]);
+            return $stmt->fetchAll();
         } catch (Throwable $e) {
             return [];
         }
@@ -230,7 +266,7 @@ final class Store
     /**
      * Enregistre une recherche. Renvoie son identifiant, ou 0 si indisponible.
      *
-     * @param array{name:string,query:string,days:int,cats:string,trackers:string,safe:bool} $s
+     * @param array{name:string,query:string,days:int,cats:string,trackers:string,safe:bool,owner?:string} $s
      */
     public function saveSearch(array $s): int
     {
@@ -240,12 +276,12 @@ final class Store
         }
         try {
             $stmt = $pdo->prepare(
-                'INSERT INTO searches (name, query, days, cats, trackers, safe, token, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+                'INSERT INTO searches (name, query, days, cats, trackers, safe, token, owner, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $s['name'], $s['query'], $s['days'], $s['cats'], $s['trackers'],
-                $s['safe'] ? 1 : 0, bin2hex(random_bytes(16)), time(),
+                $s['safe'] ? 1 : 0, bin2hex(random_bytes(16)), $s['owner'] ?? '', time(),
             ]);
             return (int) $pdo->lastInsertId();
         } catch (Throwable $e) {
@@ -254,19 +290,32 @@ final class Store
         }
     }
 
-    /** @return array<int,array<string,mixed>> */
-    public function searches(): array
+    /**
+     * Recherches enregistrées. $owner = null renvoie tout (administrateur) ;
+     * sinon seules celles de cette personne.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function searches(?string $owner = null): array
     {
         $pdo = $this->db();
         if ($pdo === null) {
             return [];
         }
         try {
-            $stmt = $pdo->query(
-                'SELECT id, name, query, days, cats, trackers, safe, token, notify, created_at
-                 FROM searches ORDER BY name COLLATE NOCASE'
+            if ($owner === null) {
+                $stmt = $pdo->query(
+                    'SELECT id, name, query, days, cats, trackers, safe, token, notify, owner, created_at
+                     FROM searches ORDER BY name COLLATE NOCASE'
+                );
+                return $stmt === false ? [] : $stmt->fetchAll();
+            }
+            $stmt = $pdo->prepare(
+                'SELECT id, name, query, days, cats, trackers, safe, token, notify, owner, created_at
+                 FROM searches WHERE owner = ? ORDER BY name COLLATE NOCASE'
             );
-            return $stmt === false ? [] : $stmt->fetchAll();
+            $stmt->execute([$owner]);
+            return $stmt->fetchAll();
         } catch (Throwable $e) {
             return [];
         }
@@ -285,7 +334,7 @@ final class Store
         }
         try {
             $stmt = $pdo->prepare(
-                'SELECT id, name, query, days, cats, trackers, safe, token
+                'SELECT id, name, query, days, cats, trackers, safe, token, owner
                  FROM searches WHERE token = ? LIMIT 1'
             );
             $stmt->execute([$token]);
@@ -374,7 +423,7 @@ final class Store
         return preg_match('/^[a-zA-Z0-9._-]{2,32}$/', $name) === 1;
     }
 
-    /** @return array<int,array{id:int,name:string,created_at:int,last_login:int}> */
+    /** @return array<int,array{id:int,name:string,created_at:int,last_login:int,indexers:string}> */
     public function users(): array
     {
         $pdo = $this->db();
@@ -382,7 +431,7 @@ final class Store
             return [];
         }
         try {
-            $stmt = $pdo->query('SELECT id, name, created_at, last_login FROM users ORDER BY name COLLATE NOCASE');
+            $stmt = $pdo->query('SELECT id, name, created_at, last_login, indexers FROM users ORDER BY name COLLATE NOCASE');
             $rows = $stmt === false ? [] : $stmt->fetchAll();
         } catch (Throwable $e) {
             return [];
@@ -392,6 +441,8 @@ final class Store
             'name'       => (string) $r['name'],
             'created_at' => (int) $r['created_at'],
             'last_login' => (int) $r['last_login'],
+            // Chaîne vide = aucune restriction (comportement par défaut).
+            'indexers'   => (string) $r['indexers'],
         ], $rows);
     }
 
@@ -421,6 +472,71 @@ final class Store
             return null;
         } catch (Throwable $e) {
             return 'Ce nom est déjà pris.';
+        }
+    }
+
+    /**
+     * Indexeurs autorisés pour un compte : null = aucune restriction.
+     *
+     * C'est une frontière de sécurité, pas un filtre d'affichage : sur un
+     * tracker privé, laisser quelqu'un chercher avec les identifiants d'un
+     * autre lui fait porter le ratio et les sanctions.
+     *
+     * @return array<int,int>|null
+     */
+    public function userIndexers(string $name): ?array
+    {
+        if ($name === '') {
+            return null; // administrateur : tous les indexeurs
+        }
+        foreach ($this->users() as $u) {
+            if (strcasecmp($u['name'], $name) !== 0) {
+                continue;
+            }
+            $raw = trim($u['indexers']);
+            if ($raw === '') {
+                return null;
+            }
+            $ids = array_values(array_filter(
+                array_map('intval', explode(',', $raw)),
+                static fn (int $n): bool => $n > 0
+            ));
+            // Une liste devenue vide après nettoyage reste une restriction :
+            // renvoyer null ici ouvrirait tout, exactement l'inverse du besoin.
+            return $ids;
+        }
+        // Compte inconnu : on n'autorise rien plutôt que tout.
+        return [];
+    }
+
+    /**
+     * Enregistre la liste autorisée et renvoie ce qui a réellement été retenu.
+     *
+     * Le retour compte : l'appelant doit rendre compte de l'état enregistré,
+     * pas de ce qu'on lui a demandé — sinon l'interface annonce une restriction
+     * qui n'est pas celle qui s'applique.
+     *
+     * @param array<int,int> $ids
+     * @return array<int,int>
+     */
+    public function setUserIndexers(int $id, array $ids): array
+    {
+        $pdo = $this->db();
+        if ($pdo === null) {
+            return [];
+        }
+        $clean = array_values(array_unique(array_filter(
+            array_map('intval', $ids),
+            static fn (int $n): bool => $n > 0 && $n < 100000
+        )));
+        $clean = array_slice($clean, 0, 100);
+        try {
+            $pdo->prepare('UPDATE users SET indexers = ? WHERE id = ?')
+                ->execute([implode(',', $clean), $id]);
+            return $clean;
+        } catch (Throwable $e) {
+            error_log('[indexof] restriction non enregistrée : ' . $e->getMessage());
+            return [];
         }
     }
 

@@ -87,6 +87,9 @@ function discord(string $webhook, string $content): bool
 foreach ($searches as $s) {
     $id = (int) $s['id'];
     try {
+        // La veille tourne hors session : elle applique la restriction du
+        // propriétaire de la recherche, comme le flux RSS.
+        $proprietaire = (string) ($s['owner'] ?? '');
         $found = perform_search($client, $store, $config, [
             'query'    => (string) $s['query'],
             'top'      => ((string) $s['query']) === '',
@@ -94,6 +97,8 @@ foreach ($searches as $s) {
             'cats'     => (string) $s['cats'],
             'trackers' => (string) $s['trackers'],
             'safe'     => ((int) $s['safe']) !== 0,
+            'allow'    => $store->userIndexers($proprietaire),
+            'user'     => $proprietaire !== '' ? $proprietaire : null,
         ]);
     } catch (Throwable $e) {
         journal('« ' . $s['name'] . ' » : recherche impossible — ' . $e->getMessage());

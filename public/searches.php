@@ -40,9 +40,25 @@ if (!$store->available()) {
 
 $op = (string) ($_POST['op'] ?? '');
 
+// Une recherche n'appartient qu'à son auteur : sans cette vérification,
+// n'importe qui pourrait supprimer, activer ou détourner celles des autres —
+// et un flux détourné s'exécute avec les indexeurs de son propriétaire.
+$scope = is_admin($config) ? null : current_user();
+$owns = static function (int $id) use ($store, $scope): bool {
+    if ($scope === null) {
+        return true; // administrateur
+    }
+    foreach ($store->searches($scope) as $s) {
+        if ((int) $s['id'] === $id) {
+            return true;
+        }
+    }
+    return false;
+};
+
 if ($op === 'delete') {
     $id = (int) ($_POST['id'] ?? 0);
-    if ($id <= 0) {
+    if ($id <= 0 || !$owns($id)) {
         json_response(['error' => 'Recherche invalide.'], 400);
     }
     $store->deleteSearch($id);
@@ -54,12 +70,18 @@ if ($op === 'notify') {
     if ($id <= 0) {
         json_response(['error' => 'Recherche invalide.'], 400);
     }
+    if (!$owns($id)) {
+        json_response(['error' => 'Recherche invalide.'], 400);
+    }
     $on = ((string) ($_POST['on'] ?? '0')) === '1';
     $store->setNotify($id, $on);
     json_response(['ok' => true, 'message' => $on ? 'Notifications activées' : 'Notifications coupées']);
 }
 
 if ($op === 'clear-history') {
+    if (!is_admin($config)) {
+        json_response(['error' => "Seul l'administrateur peut vider l'historique."], 403);
+    }
     $store->clearHistory();
     json_response(['ok' => true, 'message' => 'Historique vidé']);
 }
@@ -97,6 +119,7 @@ $id = $store->saveSearch([
     'cats'     => $idList((string) ($_POST['cats'] ?? '')),
     'trackers' => $idList((string) ($_POST['trackers'] ?? '')),
     'safe'     => ((string) ($_POST['safe'] ?? '1')) !== '0',
+    'owner'    => current_user(),
 ]);
 
 if ($id === 0) {
