@@ -618,6 +618,44 @@ a.rel:hover { color: var(--amber); }
     font-weight: 650;
 }
 
+/* ---------- Recherches enregistrées ---------- */
+.saved-chip { display: inline-flex; align-items: stretch; gap: 0; padding: 0; overflow: hidden; }
+.saved-run,
+.saved-del {
+    cursor: pointer;
+    border: none;
+    background: none;
+    color: inherit;
+    font-family: inherit;
+    font-size: 12.5px;
+    padding: 5px 10px;
+    transition: color 0.15s, background 0.15s;
+}
+.saved-run:hover { color: var(--amber); }
+.saved-del {
+    padding: 5px 8px;
+    border-left: 1px solid var(--line);
+    color: var(--faint);
+    font-size: 10px;
+}
+.saved-del:hover { color: var(--warn); background: rgba(232, 115, 90, 0.12); }
+
+.saved-add { display: flex; gap: 6px; margin-top: 8px; }
+.saved-input {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 10px;
+    border-radius: var(--r-sm);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12.5px;
+    outline: none;
+}
+.saved-input:focus { border-color: var(--amber-line); }
+.saved-input::placeholder { color: var(--faint); }
+
 /* ---------- Transferts ---------- */
 .transfers-count { color: var(--amber); font-variant-numeric: tabular-nums; }
 

@@ -37,9 +37,9 @@ COPY public/ ./public/
 # de build (lecture seule : rien n'est inscriptible).
 RUN chmod -R a=rX,u+w /var/www/html/src /var/www/html/public
 
-RUN mkdir -p /tmp/indexof_cache /var/lib/php/sessions \
-    && chown -R www-data:www-data /tmp/indexof_cache /var/lib/php/sessions \
-    && chmod 700 /var/lib/php/sessions
+RUN mkdir -p /tmp/indexof_cache /var/lib/php/sessions /var/lib/indexof \
+    && chown -R www-data:www-data /tmp/indexof_cache /var/lib/php/sessions /var/lib/indexof \
+    && chmod 700 /var/lib/php/sessions /var/lib/indexof
 
 # Tourne sans privilège root (le pool fpm n'a pas besoin de setuid).
 USER www-data

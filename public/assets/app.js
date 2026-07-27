@@ -65,7 +65,8 @@ const state = {
     results: [], rawResults: [], grouping: true,
     total: 0, capped: false, page: 1, maskOn: false, loading: false,
     qbit: false, qbitCategories: [], qbitCategory: "", arr: {},
-    view: "search", transfers: [], qbitNames: new Set(),
+    view: "search", transfersTab: "live", transfers: [], history: [],
+    qbitNames: new Set(), store: false, saved: [],
 };
 
 const $ = (s) => document.querySelector(s);
@@ -88,6 +89,10 @@ const filtersReset = $("#filters-reset");
 const resultsBox = $("#results");
 const facetsBox = $("#facets");
 const facetsBody = $("#facets-body");
+const savedBox = $("#saved");
+const savedList = $("#saved-list");
+const savedName = $("#saved-name");
+const savedSave = $("#saved-save");
 const statusBox = $("#status");
 const historyList = $("#history");
 const qbitCatWrap = $("#qbit-cat-wrap");
@@ -716,8 +721,15 @@ function renderRow(r) {
     }
     if (r.freeleech) meta.append(el("span", { class: "badge-fl", text: "FREE" }));
     if (r.adult) meta.append(el("span", { class: "badge-adult", text: "-18" }));
-    // Rapprochement par nom : qBittorrent renomme parfois, c'est une indication.
-    if (state.qbitNames.has(normalizeName(r.title))) {
+    // Ce que nous avons envoyé est certain (titre enregistré tel quel).
+    // Le rapprochement par nom avec qBittorrent n'est qu'un repli : il renomme
+    // parfois les torrents.
+    if (r.sent) {
+        const quand = new Date(r.sent.at * 1000).toLocaleDateString("fr-FR");
+        meta.append(el("span", { class: "badge-have",
+            title: `Envoyé le ${quand} vers ${r.sent.target === "qbit" ? "qBittorrent" : r.sent.target}`,
+            text: "DÉJÀ PRIS" }));
+    } else if (state.qbitNames.has(normalizeName(r.title))) {
         meta.append(el("span", { class: "badge-have", title: "Déjà présent dans qBittorrent", text: "DANS QBIT" }));
     }
     titleCell.append(meta);
@@ -793,13 +805,13 @@ async function sendTo(r, btn, to) {
     const body = new URLSearchParams();
     body.set("token", r.send);
     body.set("to", to);
+    // Le titre et l'indexeur servent au rapprochement côté Sonarr/Radarr, et à
+    // mémoriser l'envoi pour reconnaître la release plus tard.
+    body.set("title", r.title);
+    body.set("indexer", r.indexer || "");
     if (to === "qbit") {
         if (state.qbitCategory) body.set("category", state.qbitCategory);
     } else {
-        // Sonarr/Radarr rapprochent la release de ce qu'ils suivent : ils ont
-        // besoin du titre, de l'indexeur et de la date de publication.
-        body.set("title", r.title);
-        body.set("indexer", r.indexer || "");
         body.set("publishDate", r.publishDate || "");
     }
     try {
@@ -845,7 +857,9 @@ async function loadStatus() {
         state.qbit = !!s.qbit;
         state.qbitCategories = s.qbitCategories || [];
         state.arr = s.arr || {};
+        state.store = !!s.store;
         if (state.qbit) loadTransfers();
+        if (state.store) loadSaved();
         renderQbitCategories();
 
         const dot = statusBox.querySelector(".status-dot");
@@ -1042,14 +1056,88 @@ if (transfersBtn) {
     });
 }
 
+async function loadHistory() {
+    try {
+        const res = await fetch("api.php?action=history");
+        const data = await res.json();
+        state.history = data.history || [];
+    } catch (e) { state.history = []; }
+    if (state.view === "transfers") renderTransfers();
+}
+
+/** Bascule « en cours » / « historique » de la vue Transferts. */
+function transfersTabs() {
+    const box = el("div", { class: "segmented" });
+    const mk = (id, label) => {
+        const b = el("button", { type: "button", text: label });
+        if (state.transfersTab === id) b.classList.add("active");
+        b.addEventListener("click", () => {
+            state.transfersTab = id;
+            if (id === "history") loadHistory(); else renderTransfers();
+        });
+        return b;
+    };
+    box.append(mk("live", `En cours (${state.transfers.length})`));
+    if (state.store) box.append(mk("history", "Historique"));
+    return box;
+}
+
+function renderSendHistory() {
+    const meta = el("div", { class: "meta-row" },
+        transfersTabs(),
+        el("span", { class: "meta-actions" }));
+    if (state.history.length) {
+        const purge = el("button", { type: "button", class: "link-btn", text: "Vider l'historique" });
+        purge.addEventListener("click", async () => {
+            const { ok, data } = await postForm("searches.php", { op: "clear-history" });
+            toast(ok ? data.message : (data.error || "Échec"));
+            loadHistory();
+        });
+        meta.lastChild.append(purge);
+    }
+
+    if (!state.history.length) {
+        resultsBox.replaceChildren(meta, el("div", { class: "state" },
+            el("span", { class: "emoji", text: "🗂️" }),
+            "Rien d'envoyé pour l'instant. L'historique retient ce que vous prenez, même après suppression du torrent."));
+        return;
+    }
+
+    const rows = state.history.map((h) => {
+        const tr = el("tr");
+        const cell = el("td", { class: "cell-title" });
+        cell.append(el("span", { class: "rel", title: h.title }, renderRelease(h.title)));
+        const meta2 = el("div", { class: "rel-meta" },
+            el("span", { class: "idx-tag maskable", text: h.indexer || "—" }),
+            el("span", { class: "sep", text: "·" }),
+            el("span", { text: h.target === "qbit" ? "qBittorrent" : h.target }));
+        cell.append(meta2);
+        tr.append(cell);
+        tr.append(el("td", { class: "num" },
+            new Date(h.created_at * 1000).toLocaleDateString("fr-FR", {
+                day: "2-digit", month: "2-digit", year: "2-digit",
+            })));
+        return tr;
+    });
+
+    const table = el("table", {},
+        el("thead", {}, el("tr", {}, el("th", { text: "Release" }), el("th", { class: "num", text: "Envoyé le" }))),
+        el("tbody", {}, ...rows));
+    resultsBox.replaceChildren(meta, el("div", { class: "table-wrap" }, table));
+}
+
 function renderTransfers() {
     hideFacets();
     observeMore(null);
 
+    if (state.transfersTab === "history") { renderSendHistory(); return; }
+
     if (!state.transfers.length) {
-        resultsBox.replaceChildren(el("div", { class: "state" },
-            el("span", { class: "emoji", text: "📥" }),
-            "Aucun transfert. Envoyez une release à qBittorrent depuis la recherche."));
+        resultsBox.replaceChildren(
+            el("div", { class: "meta-row" }, transfersTabs()),
+            el("div", { class: "state" },
+                el("span", { class: "emoji", text: "📥" }),
+                "Aucun transfert. Envoyez une release à qBittorrent depuis la recherche."));
         return;
     }
 
@@ -1057,9 +1145,8 @@ function renderTransfers() {
     const dl = state.transfers.reduce((n, t) => n + t.dlspeed, 0);
     const up = state.transfers.reduce((n, t) => n + t.upspeed, 0);
     const meta = el("div", { class: "meta-row" },
-        el("span", {}, el("b", { text: String(state.transfers.length) }),
-            ` transfert${state.transfers.length > 1 ? "s" : ""}`,
-            el("span", { class: "muted", text: ` · ${formatSize(total)}` })),
+        transfersTabs(),
+        el("span", { class: "muted", text: formatSize(total) }),
         el("span", { class: "meta-actions" },
             el("span", { class: "muted", text: `↓ ${formatSpeed(dl)}  ↑ ${formatSpeed(up)}` })));
 
@@ -1165,6 +1252,98 @@ async function transferAction(hash, op, files, btn) {
         toast("Échec de l'action");
     }
     loadTransfers();
+}
+
+/* ==================================================================
+   Recherches enregistrées
+
+   Une recherche, c'est une requête plus des filtres. On la met de côté
+   sous un nom, on la rejoue d'un clic. C'est la seule chose que
+   l'application mémorise en propre, avec l'historique des envois.
+   ================================================================== */
+async function loadSaved() {
+    try {
+        const res = await fetch("api.php?action=searches");
+        const data = await res.json();
+        state.saved = data.searches || [];
+        renderSaved();
+    } catch (e) { /* la base peut être indisponible */ }
+}
+
+function renderSaved() {
+    if (!savedBox || !savedList) return;
+    savedBox.hidden = !state.store;
+    if (!state.store) return;
+
+    if (!state.saved.length) {
+        savedList.replaceChildren(el("span", { class: "muted", text: "Aucune pour l'instant." }));
+        return;
+    }
+    savedList.replaceChildren(...state.saved.map((s) => {
+        const chip = el("span", { class: "chip saved-chip" });
+        const run = el("button", { type: "button", class: "saved-run", text: s.name,
+            title: s.query ? `Rechercher « ${s.query} »` : "Derniers uploads" });
+        run.addEventListener("click", () => runSaved(s));
+        const del = el("button", { type: "button", class: "saved-del", text: "✕", title: "Supprimer" });
+        del.addEventListener("click", () => deleteSaved(s.id));
+        chip.append(run, del);
+        return chip;
+    }));
+}
+
+/** Rejoue une recherche enregistrée : requête et filtres sont restaurés. */
+function runSaved(s) {
+    setView("search");
+    state.query = s.query || "";
+    input.value = state.query;
+    state.mode = state.query ? "search" : "top";
+    state.days = Number(s.days) || 0;
+    state.safeMode = Number(s.safe) !== 0;
+    state.cats = new Set(String(s.cats || "").split(",").map(Number).filter(Boolean));
+    state.trackers = new Set(String(s.trackers || "").split(",").map(Number).filter(Boolean));
+    state.page = 1;
+    renderDays();
+    renderCats();
+    renderChips(lastIndexers);
+    applySafe();
+    setFiltersOpen(false);
+    runSearch();
+}
+
+async function postForm(url, fields) {
+    const body = new URLSearchParams(fields);
+    const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": CSRF },
+        body: body.toString(),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok && data.ok, data };
+}
+
+async function deleteSaved(id) {
+    const { ok, data } = await postForm("searches.php", { op: "delete", id });
+    toast(ok ? data.message : (data.error || "Échec"));
+    loadSaved();
+}
+
+if (savedSave && savedName) {
+    const save = async () => {
+        const name = savedName.value.trim() || state.query || "Derniers uploads";
+        const { ok, data } = await postForm("searches.php", {
+            op: "save",
+            name,
+            query: state.query,
+            days: state.days,
+            cats: [...state.cats].join(","),
+            trackers: [...state.trackers].join(","),
+            safe: state.safeMode ? "1" : "0",
+        });
+        toast(ok ? data.message : (data.error || "Échec"));
+        if (ok) { savedName.value = ""; loadSaved(); }
+    };
+    savedSave.addEventListener("click", save);
+    savedName.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); save(); } });
 }
 
 /* ==================================================================

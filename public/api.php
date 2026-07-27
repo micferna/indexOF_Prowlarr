@@ -18,6 +18,7 @@ require_once __DIR__ . '/../src/functions.php';
 require_once __DIR__ . '/../src/auth.php';
 require_once __DIR__ . '/../src/ProwlarrClient.php';
 require_once __DIR__ . '/../src/QbittorrentClient.php';
+require_once __DIR__ . '/../src/Store.php';
 
 $config = load_config();
 
@@ -114,6 +115,8 @@ $client = new ProwlarrClient(
     $config['cache_dir'],
 );
 
+$store = new Store($config['db_file']);
+
 $action = (string) ($_GET['action'] ?? 'search');
 
 try {
@@ -150,7 +153,18 @@ try {
             // Cibles *arr actives : le front n'affiche que ces boutons-là.
             'arr'            => array_map(static fn (array $t): string => $t['label'], $config['arr']),
             'authEnabled'    => auth_enabled($config),
+            // Sans base accessible, les recherches enregistrées et l'historique
+            // n'ont pas lieu d'apparaître dans l'interface.
+            'store'          => $store->available(),
         ]);
+    }
+
+    if ($action === 'searches') {
+        json_response(['searches' => $store->searches()]);
+    }
+
+    if ($action === 'history') {
+        json_response(['history' => $store->history()]);
     }
 
     if ($action === 'indexers') {
@@ -247,8 +261,17 @@ try {
         }
         $total = count($all);
         $page  = array_slice($all, 0, $limit);
+        // Marquage des releases déjà envoyées : rapprochement sur le titre que
+        // NOUS avons enregistré, donc exact — contrairement au nom que
+        // qBittorrent peut avoir réécrit.
+        $sent = $store->sentIndex();
         $results = array_map(
-            static fn (array $r): array => map_result($r, $config['secret']),
+            static function (array $r) use ($config, $sent): array {
+                $mapped = map_result($r, $config['secret']);
+                $key = Store::titleKey($mapped['title']);
+                $mapped['sent'] = isset($sent[$key]) ? $sent[$key] : null;
+                return $mapped;
+            },
             $page
         );
 

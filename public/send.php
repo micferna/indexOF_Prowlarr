@@ -21,6 +21,7 @@ require_once __DIR__ . '/../src/functions.php';
 require_once __DIR__ . '/../src/auth.php';
 require_once __DIR__ . '/../src/QbittorrentClient.php';
 require_once __DIR__ . '/../src/ArrClient.php';
+require_once __DIR__ . '/../src/Store.php';
 
 $config = load_config();
 
@@ -95,6 +96,14 @@ if ($to === 'qbit') {
 
     try {
         $qbit->add($target, $category);
+        // Mémorisé côté serveur : qBittorrent renomme les torrents et, sans
+        // magnet, aucun hash n'est connu avant téléchargement. Sans cette trace,
+        // impossible de savoir plus tard qu'on a déjà pris cette release.
+        (new Store($config['db_file']))->recordSend(
+            trim((string) ($_POST['title'] ?? '')),
+            trim((string) ($_POST['indexer'] ?? '')),
+            'qbit',
+        );
         json_response(['ok' => true, 'message' => 'Envoyé à qBittorrent']);
     } catch (Throwable $e) {
         error_log('[indexof] qbit error: ' . $e->getMessage());
@@ -125,6 +134,7 @@ try {
         trim((string) ($_POST['indexer'] ?? '')),
         trim((string) ($_POST['publishDate'] ?? '')),
     );
+    (new Store($config['db_file']))->recordSend($title, trim((string) ($_POST['indexer'] ?? '')), $to);
     json_response(['ok' => true, 'message' => $arr['label'] . ' : ' . $message]);
 } catch (Throwable $e) {
     error_log('[indexof] ' . $to . ' error: ' . $e->getMessage());

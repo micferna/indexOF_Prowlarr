@@ -68,6 +68,15 @@ $showLogout = auth_enabled($config);
                     <span class="fp-label">Indexeurs</span>
                     <div id="trackers" class="chips" aria-label="Filtrer par indexeur"></div>
                 </div>
+                <div id="saved" class="fp-section" hidden>
+                    <span class="fp-label">Recherches enregistrées</span>
+                    <div id="saved-list" class="chips"></div>
+                    <div class="saved-add">
+                        <input id="saved-name" type="text" maxlength="80" class="saved-input"
+                               placeholder="Nom de la recherche en cours" aria-label="Nom de la recherche">
+                        <button type="button" id="saved-save" class="del-choice">Enregistrer</button>
+                    </div>
+                </div>
                 <div id="facets" class="fp-section" hidden>
                     <span class="fp-label">Affiner <span class="fp-hint">— dans les résultats affichés</span></span>
                     <div id="facets-body"></div>

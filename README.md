@@ -66,6 +66,13 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
 - **Actions** : télécharger le `.torrent` (proxy chiffré), ouvrir ou copier le magnet,
   envoyer à qBittorrent avec choix de la catégorie, ou pousser la release vers
   Sonarr / Radarr / Lidarr / Readarr.
+- **Recherches enregistrées** : mettez de côté une requête et ses filtres, rejouez-la
+  d'un clic depuis le panneau Filtres.
+- **« Déjà pris »** : les releases que vous avez déjà envoyées sont marquées dans les
+  résultats, avec la date et la destination. Le rapprochement se fait sur le titre
+  enregistré au moment de l'envoi, pas sur le nom que le client a pu réécrire.
+- **Historique des envois**, consultable et purgeable depuis la vue Transferts : il
+  garde la trace même après suppression du torrent.
 - **Transferts** : ce que qBittorrent télécharge ou partage, sans quitter l'app —
   progression, ratio, vitesses, état. Arrêt, relance et suppression (avec ou sans
   les fichiers, en deux temps, sans boîte de dialogue). Rafraîchi toutes les 3 s,
@@ -92,6 +99,7 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
 | `LIDARR_URL` / `LIDARR_API_KEY` | Lidarr | _(vide)_ |
 | `READARR_URL` / `READARR_API_KEY` | Readarr | _(vide)_ |
 | `TRUST_PROXY` | `1` seulement derrière un reverse-proxy qui pose `X-Forwarded-For` | `0` |
+| `DATA_DIR` | Répertoire de la base SQLite (historique, recherches enregistrées) | `/var/lib/indexof` |
 | `CACHE_TTL` | Durée du cache recherches/indexeurs (s) | `120` |
 | `CACHE_DIR` | Répertoire de cache | `/tmp/indexof_cache` |
 
@@ -135,6 +143,7 @@ docker compose --profile arr up -d
 - **Anti-brute-force** : `limit_req` nginx sur les POST de login + verrouillage applicatif (10 échecs / 15 min par IP).
 - **En-têtes** : CSP stricte (pas d'inline, pas de CDN), `nosniff`, `no-referrer`, `frame-ancestors 'none'`.
 - **Conteneurs durcis** : non-root, `cap_drop: ALL`, `no-new-privileges`, système de fichiers en lecture seule, ports liés à la loopback.
+- **Dégradation propre** : si la base n'est pas accessible en écriture, les recherches enregistrées et l'historique disparaissent de l'interface — la recherche, elle, continue de fonctionner.
 
 En production : terminez le TLS sur un reverse-proxy, décommentez `Strict-Transport-Security` dans `docker/nginx.conf`, et si le proxy pose `X-Forwarded-For`, mettez `TRUST_PROXY=1` **et** configurez le module `realip` de nginx (sinon le rate-limit voit l'IP du proxy et un seul attaquant verrouille tout le monde).
 
@@ -154,6 +163,8 @@ src/                    # Hors racine web
   ProwlarrClient.php    # Client API Prowlarr (cURL, X-Api-Key, cache, timeouts)
   QbittorrentClient.php # Client Web API qBittorrent (ajout par URL/magnet)
   functions.php         # Échappement, URL, jetons scellés, anti-SSRF, formatage
+  ArrClient.php         # Client Sonarr/Radarr/Lidarr/Readarr (release/push)
+  Store.php             # Base SQLite : envois mémorisés, recherches enregistrées
 tests/                  # Tests PHPUnit (fonctions critiques)
 docker/nginx.conf       # Vhost nginx (reverse-proxy FastCGI vers php-fpm)
 Dockerfile              # Multi-stage : php-fpm (app) + nginx (web), base Alpine

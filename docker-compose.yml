@@ -30,6 +30,9 @@ services:
     # tmpfs et chaque `up -d php` déconnecte tous les utilisateurs.
     volumes:
       - php-sessions:/var/lib/php/sessions
+      # Historique d'envois et recherches enregistrées : une base SQLite, donc
+      # un volume. Sans lui, ces fonctionnalités se désactivent d'elles-mêmes.
+      - php-data:/var/lib/indexof
 
   web:
     build:
@@ -156,6 +159,7 @@ services:
 
 volumes:
   php-sessions:
+  php-data:
 
 networks:
   indexof:
