@@ -6,7 +6,9 @@ Interface web légère (PHP) pour rechercher des releases via l'API [Prowlarr](h
 [Rejoignez le Discord !](https://discord.gg/rSfTxaW)
 
 <p align="center">
-  <img src="https://i.goopics.net/vfdyoc.png" alt="indexOF">
+  <img src="docs/screenshot.png" alt="Liste de résultats indexOF : nom de release en clair, tokens techniques mis en valeur, taille, seeders et âge">
+  <br>
+  <sub>Noms de release et d'indexeurs floutés pour la capture.</sub>
 </p>
 
 ---
