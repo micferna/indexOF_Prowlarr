@@ -129,7 +129,8 @@ final class Store
                 pass_hash  TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 last_login INTEGER NOT NULL DEFAULT 0,
-                indexers   TEXT NOT NULL DEFAULT ""
+                indexers   TEXT NOT NULL DEFAULT "",
+                category   TEXT NOT NULL DEFAULT ""
             )'
         );
 
@@ -141,6 +142,9 @@ final class Store
         }
         if (!in_array('indexers', $ucols, true)) {
             $pdo->exec('ALTER TABLE users ADD COLUMN indexers TEXT NOT NULL DEFAULT ""');
+        }
+        if (!in_array('category', $ucols, true)) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN category TEXT NOT NULL DEFAULT ""');
         }
 
         // Releases déjà signalées, pour ne notifier que la nouveauté.
@@ -423,7 +427,7 @@ final class Store
         return preg_match('/^[a-zA-Z0-9._-]{2,32}$/', $name) === 1;
     }
 
-    /** @return array<int,array{id:int,name:string,created_at:int,last_login:int,indexers:string}> */
+    /** @return array<int,array{id:int,name:string,created_at:int,last_login:int,indexers:string,category:string}> */
     public function users(): array
     {
         $pdo = $this->db();
@@ -431,7 +435,7 @@ final class Store
             return [];
         }
         try {
-            $stmt = $pdo->query('SELECT id, name, created_at, last_login, indexers FROM users ORDER BY name COLLATE NOCASE');
+            $stmt = $pdo->query('SELECT id, name, created_at, last_login, indexers, category FROM users ORDER BY name COLLATE NOCASE');
             $rows = $stmt === false ? [] : $stmt->fetchAll();
         } catch (Throwable $e) {
             return [];
@@ -443,6 +447,9 @@ final class Store
             'last_login' => (int) $r['last_login'],
             // Chaîne vide = aucune restriction (comportement par défaut).
             'indexers'   => (string) $r['indexers'],
+            // Catégorie qBittorrent imposée : sépare les téléchargements de
+            // chacun au lieu de tout déverser au même endroit.
+            'category'   => (string) $r['category'],
         ], $rows);
     }
 
@@ -537,6 +544,63 @@ final class Store
         } catch (Throwable $e) {
             error_log('[indexof] restriction non enregistrée : ' . $e->getMessage());
             return [];
+        }
+    }
+
+    /**
+     * Ce compte nommé existe-t-il encore ?
+     *
+     * Sans base accessible on répond « oui » : couper toutes les sessions
+     * nommées à la moindre indisponibilité de SQLite serait une panne, pas une
+     * sécurité — le cloisonnement, lui, reste fermé par défaut.
+     */
+    public function userExists(string $name): bool
+    {
+        if ($name === '' || !$this->available()) {
+            return true;
+        }
+        foreach ($this->users() as $u) {
+            if (strcasecmp($u['name'], $name) === 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Catégorie qBittorrent imposée à un compte ('' = libre choix). */
+    public function userCategory(string $name): string
+    {
+        if ($name === '') {
+            return '';
+        }
+        foreach ($this->users() as $u) {
+            if (strcasecmp($u['name'], $name) === 0) {
+                return $u['category'];
+            }
+        }
+        return '';
+    }
+
+    public function setUserCategory(int $id, string $category): string
+    {
+        $pdo = $this->db();
+        if ($pdo === null) {
+            return '';
+        }
+        // Une catégorie qBittorrent reste un nom simple : on ne relaie pas
+        // n'importe quoi au client de téléchargement.
+        $clean = preg_replace('/[^\p{L}\p{N} ._-]/u', '', trim($category)) ?? '';
+        // qBittorrent dérive un dossier du nom de catégorie : un nom qui commence
+        // par un point donnerait un répertoire caché, et une suite de points n'a
+        // aucun sens comme nom de dossier.
+        $clean = trim($clean, " ._-");
+        $clean = mb_substr($clean, 0, 40);
+        try {
+            $pdo->prepare('UPDATE users SET category = ? WHERE id = ?')->execute([$clean, $id]);
+            return $clean;
+        } catch (Throwable $e) {
+            error_log('[indexof] catégorie non enregistrée : ' . $e->getMessage());
+            return '';
         }
     }
 

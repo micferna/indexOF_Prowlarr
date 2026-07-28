@@ -298,6 +298,44 @@ final class StoreTest extends TestCase
         $this->assertArrayNotHasKey(Store::titleKey('B'), $store->sentIndex(2000, 'alice'));
     }
 
+    public function testCategoryIsSanitisedBeforeReachingTheDownloadClient(): void
+    {
+        $store = new Store($this->file);
+        $this->assertNull($store->addUser('alice', 'motdepasse-tres-long'));
+        $id = (int) $store->users()[0]['id'];
+
+        // Ni séparateur de chemin, ni caractère de commande : qBittorrent dérive
+        // un dossier de ce nom.
+        $this->assertSame('etc rm -rf', $store->setUserCategory($id, '../../etc; rm -rf /'));
+        // Un nom qui ne commence pas par un caractère utile ne donne rien.
+        $this->assertSame('', $store->setUserCategory($id, '...'));
+        $this->assertSame('cache', $store->setUserCategory($id, '.cache'));
+        $this->assertSame(40, mb_strlen($store->setUserCategory($id, str_repeat('a', 80))));
+        // Les accents et les tirets restent : ce sont des noms de dossier valides.
+        $this->assertSame('Séries-alice', $store->setUserCategory($id, 'Séries-alice'));
+
+        $this->assertSame('Séries-alice', (new Store($this->file))->userCategory('alice'));
+        // L'administrateur et les inconnus n'ont aucune catégorie imposée.
+        $this->assertSame('', $store->userCategory(''));
+        $this->assertSame('', $store->userCategory('bob'));
+    }
+
+    public function testUserExistsFollowsAccountDeletion(): void
+    {
+        $store = new Store($this->file);
+        $this->assertNull($store->addUser('alice', 'motdepasse-tres-long'));
+        $id = (int) $store->users()[0]['id'];
+
+        $this->assertTrue($store->userExists('alice'));
+        $this->assertTrue($store->userExists('ALICE'), 'la casse ne doit pas créer un compte fantôme');
+        $this->assertFalse($store->userExists('bob'));
+        // '' est l'administrateur : il n'a pas de ligne en base et existe toujours.
+        $this->assertTrue($store->userExists(''));
+
+        $store->deleteUser($id);
+        $this->assertFalse((new Store($this->file))->userExists('alice'));
+    }
+
     public function testUnavailableStoreDegradesInsteadOfThrowing(): void
     {
         // Chemin impossible à créer : l'application doit continuer de tourner.
@@ -320,6 +358,10 @@ final class StoreTest extends TestCase
         $this->assertNull($store->checkUser('alice', 'motdepasse-tres-long'));
         $store->deleteUser(1);
         $this->assertSame([], $store->setUserIndexers(1, [1]));
+        $this->assertSame('', $store->setUserCategory(1, 'alice-dl'));
+        $this->assertSame('', $store->userCategory('alice'));
+        // Base injoignable : on ne déconnecte pas tout le monde pour autant.
+        $this->assertTrue($store->userExists('alice'));
         $this->assertSame([], $store->notifiedSearches());
         $store->setNotify(1, true);
         // Ne doit lever aucune exception.

@@ -74,6 +74,18 @@ if ($op === 'indexers') {
     ]);
 }
 
+if ($op === 'category') {
+    $id = (int) ($_POST['id'] ?? 0);
+    if ($id <= 0) {
+        json_response(['error' => 'Compte invalide.'], 400);
+    }
+    $retenue = $store->setUserCategory($id, (string) ($_POST['category'] ?? ''));
+    json_response([
+        'ok' => true,
+        'message' => $retenue === '' ? 'Catégorie libre' : 'Catégorie imposée : ' . $retenue,
+    ]);
+}
+
 if ($op !== 'add') {
     json_response(['error' => 'Action inconnue.'], 400);
 }

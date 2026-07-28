@@ -663,6 +663,22 @@ a.rel:hover { color: var(--amber); }
 
 .users-add { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px 14px; }
 .users-add .saved-input { flex: 1 1 180px; max-width: 260px; }
+.user-cat { margin-top: 6px; }
+.user-cat .cat-input { max-width: 260px; }
+
+/* Sauvegarde : volontairement en bas de la vue et sans couleur d'appel — on ne
+   restaure pas une base par curiosité. */
+.backup {
+    margin-top: 22px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md, 10px);
+    background: var(--panel, transparent);
+}
+.backup-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.backup-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.backup-row .saved-input { flex: 1 1 200px; max-width: 320px; }
+.backup a.del-choice { text-decoration: none; display: inline-flex; align-items: center; }
 .saved-input {
     flex: 1;
     min-width: 0;

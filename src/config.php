@@ -25,6 +25,74 @@ function arr_targets(callable $get): array
 }
 
 /**
+ * Interrompt le démarrage sur un écran de diagnostic.
+ *
+ * Une installation neuve se trompe presque toujours sur les mêmes quatre
+ * lignes ; autant les nommer toutes, avec le remède, plutôt que de renvoyer un
+ * « Configuration manquante » sec.
+ *
+ * Cet écran ne fait que lire et rendre compte : il n'écrit RIEN. Un formulaire
+ * de configuration accessible sans authentification — puisqu'il n'y a pas
+ * encore de mot de passe — serait une porte ouverte sur l'hôte.
+ *
+ * @param array<int,array{cle:string,probleme:string,remede:string,exemple:string}> $manques
+ */
+function config_incomplete(array $manques): never
+{
+    if (PHP_SAPI === 'cli') {
+        fwrite(STDERR, "Configuration incomplète :" . PHP_EOL);
+        foreach ($manques as $m) {
+            fwrite(STDERR, sprintf("  - %s : %s%s    %s%s", $m['cle'], $m['probleme'], PHP_EOL, $m['remede'], PHP_EOL));
+        }
+        exit(1);
+    }
+
+    http_response_code(503);
+    header('Content-Type: text/html; charset=utf-8');
+    header('Cache-Control: no-store');
+    header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'");
+    header('X-Content-Type-Options: nosniff');
+    header('Referrer-Policy: no-referrer');
+
+    $esc = static fn (string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+    $lignes = '';
+    foreach ($manques as $m) {
+        $lignes .= '<li><code>' . $esc($m['cle']) . '</code> <em>' . $esc($m['probleme']) . '</em>'
+            . '<p>' . $esc($m['remede']) . '</p>'
+            . '<pre>' . $esc($m['exemple']) . '</pre></li>';
+    }
+
+    $n = count($manques);
+    echo '<!doctype html><html lang="fr"><head><meta charset="utf-8">'
+        . '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        . '<title>Configuration à compléter — indexOF</title><style>'
+        . 'body{margin:0;padding:32px 20px;background:#0f141b;color:#e2e8f0;'
+        . 'font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}'
+        . 'main{max-width:640px;margin:0 auto}'
+        . 'h1{font-size:20px;margin:0 0 6px}'
+        . '.sub{color:#94a3b8;margin:0 0 26px}'
+        . 'ol{list-style:none;margin:0;padding:0}'
+        . 'li{border:1px solid #1e293b;border-left:3px solid #f59e0b;border-radius:8px;'
+        . 'padding:14px 16px;margin-bottom:12px;background:#141b24}'
+        . 'code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#f59e0b;font-size:14px}'
+        . 'em{color:#94a3b8;font-style:normal;font-size:13px;margin-left:8px}'
+        . 'li p{margin:8px 0 0;color:#cbd5e1;font-size:13.5px}'
+        . 'pre{margin:8px 0 0;padding:8px 10px;background:#0f141b;border:1px solid #1e293b;'
+        . 'border-radius:6px;overflow-x:auto;font-size:12.5px;color:#e2e8f0}'
+        . 'footer{margin-top:24px;color:#64748b;font-size:13px}'
+        . '</style></head><body><main>'
+        . '<h1>Il manque ' . $n . ' réglage' . ($n > 1 ? 's' : '') . '</h1>'
+        . '<p class="sub">Complétez le fichier <code>.env</code> à la racine, puis redémarrez&nbsp;: '
+        . '<code>docker compose up -d</code></p>'
+        . '<ol>' . $lignes . '</ol>'
+        . '<footer>Cet écran lit la configuration, il ne la modifie pas&nbsp;: sans mot de passe défini, '
+        . 'un formulaire ici serait accessible à n\'importe qui. Partez de <code>.env.example</code>.</footer>'
+        . '</main></body></html>';
+    exit;
+}
+
+/**
  * Charge la configuration depuis les variables d'environnement (priorité Docker)
  * avec repli sur un fichier .env à la racine du projet pour le développement local.
  *
@@ -62,21 +130,48 @@ function load_config(): array
         return $value !== null ? trim((string) $value) : null;
     };
 
-    $apiKey  = $get('PROWLARR_API_KEY');
-    $baseUrl = $get('PROWLARR_BASE_URL');
+    // Tous les manques sont relevés d'un coup : corriger sa configuration une
+    // ligne à la fois, en rechargeant entre chaque, est une perte de temps.
+    $manques = [];
 
-    if ($apiKey === null || $apiKey === '' || $baseUrl === null || $baseUrl === '') {
-        http_response_code(500);
-        exit('Configuration manquante : définissez PROWLARR_API_KEY et PROWLARR_BASE_URL.');
+    $apiKey  = (string) $get('PROWLARR_API_KEY', '');
+    $baseUrl = (string) $get('PROWLARR_BASE_URL', '');
+
+    if ($apiKey === '') {
+        $manques[] = [
+            'cle'      => 'PROWLARR_API_KEY',
+            'probleme' => 'absente',
+            'remede'   => 'Prowlarr → Settings → General → API Key.',
+            'exemple'  => 'PROWLARR_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+        ];
+    }
+    if ($baseUrl === '') {
+        $manques[] = [
+            'cle'      => 'PROWLARR_BASE_URL',
+            'probleme' => 'absente',
+            'remede'   => "L'adresse de Prowlarr vue depuis ce conteneur, pas depuis votre navigateur.",
+            'exemple'  => 'PROWLARR_BASE_URL=http://prowlarr:9696',
+        ];
+    } elseif (!preg_match('~^https?://~i', $baseUrl)) {
+        $manques[] = [
+            'cle'      => 'PROWLARR_BASE_URL',
+            'probleme' => 'sans schéma http:// ou https://',
+            'remede'   => "L'adresse doit commencer par http:// ou https://.",
+            'exemple'  => 'PROWLARR_BASE_URL=http://prowlarr:9696',
+        ];
     }
 
     // APP_SECRET : obligatoire et fort. Pas de repli déterministe — il serait
     // dérivable de la clé API (exposée au backend) et permettrait de forger des
     // jetons de téléchargement.
-    $secret = $get('APP_SECRET');
-    if ($secret === null || $secret === '' || strlen($secret) < 16 || str_starts_with($secret, 'changeme')) {
-        http_response_code(500);
-        exit("Configuration manquante : définissez un APP_SECRET fort (openssl rand -hex 32).");
+    $secret = (string) $get('APP_SECRET', '');
+    if ($secret === '' || strlen($secret) < 16 || str_starts_with($secret, 'changeme')) {
+        $manques[] = [
+            'cle'      => 'APP_SECRET',
+            'probleme' => $secret === '' ? 'absente' : 'trop faible (32 caractères aléatoires attendus)',
+            'remede'   => 'Cette clé chiffre les liens de téléchargement. Tirez-la au hasard, ne la choisissez pas :',
+            'exemple'  => 'openssl rand -hex 32',
+        ];
     }
 
     // Fail-closed : refuse de démarrer sans mot de passe, sauf désactivation
@@ -84,8 +179,17 @@ function load_config(): array
     $password = (string) $get('APP_PASSWORD', '');
     $authDisabled = $get('AUTH_DISABLED', '0') === '1';
     if ($password === '' && !$authDisabled) {
-        http_response_code(500);
-        exit("Configuration manquante : définissez APP_PASSWORD (ou AUTH_DISABLED=1 pour désactiver explicitement l'authentification).");
+        $manques[] = [
+            'cle'      => 'APP_PASSWORD',
+            'probleme' => 'absente',
+            'remede'   => "Le mot de passe d'entrée, qui donne aussi les droits d'administration. "
+                . 'Pour ouvrir volontairement le site à tous : AUTH_DISABLED=1.',
+            'exemple'  => 'openssl rand -base64 24',
+        ];
+    }
+
+    if ($manques !== []) {
+        config_incomplete($manques);
     }
 
     $config = [

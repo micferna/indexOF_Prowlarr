@@ -234,6 +234,7 @@ try {
             'cats'     => (string) ($_GET['cats'] ?? ''),
             'trackers' => (string) ($_GET['trackers'] ?? ''),
             'safe'     => ((string) ($_GET['safe'] ?? '1')) !== '0',
+            'offset'   => (int) ($_GET['offset'] ?? 0),
             'allow'    => $allow,
             'user'     => $scope,
         ]));

@@ -42,11 +42,12 @@ $showLogout = auth_enabled($config);
             <button type="submit" class="btn-primary"><span class="btn-label">Rechercher</span></button>
         </form>
 
-        <button type="button" id="top-btn" class="btn-top" title="Derniers uploads de tous les trackers, sans recherche">
+        <button type="button" id="top-btn" class="btn-top" aria-label="Derniers uploads"
+                title="Derniers uploads de tous les trackers, sans recherche">
             <span class="btn-top-fire" aria-hidden="true">🔥</span><span class="btn-top-label">Top</span>
         </button>
 
-        <button type="button" id="transfers-btn" class="btn-top" hidden
+        <button type="button" id="transfers-btn" class="btn-top" hidden aria-label="Transferts en cours"
                 title="Ce que qBittorrent est en train de télécharger ou de partager">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
             <span class="btn-top-label">Transferts</span><span id="transfers-count" class="transfers-count"></span>
@@ -104,17 +105,19 @@ $showLogout = auth_enabled($config);
         </div>
 
         <div class="appbar-right">
-            <button type="button" id="status" class="status" title="Santé des indexeurs — latence, échecs">
+            <button type="button" id="status" class="status" aria-label="Santé des indexeurs"
+                    title="Santé des indexeurs — latence, échecs">
                 <span class="status-dot"></span><span class="status-text">…</span>
             </button>
             <button type="button" id="safe-toggle" class="safe-btn" aria-pressed="true"
+                    aria-label="Afficher ou masquer le contenu -18"
                     title="Contenu -18 masqué — cliquer pour l'afficher">🔞</button>
             <label id="qbit-cat-wrap" class="qbit-cat" hidden>
                 <svg viewBox="0 0 24 24" aria-hidden="true" class="qbit-ic"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
                 <select id="qbit-cat" aria-label="Catégorie qBittorrent"></select>
             </label>
             <?php if ($showLogout): ?>
-                <button type="button" id="account-btn" class="btn-top" hidden
+                <button type="button" id="account-btn" class="btn-top" hidden aria-label="Comptes utilisateurs"
                         title="Comptes utilisateurs"><span id="account-name"></span></button>
                 <a href="logout.php?csrf=<?php echo e($csrf); ?>" class="logout" title="Déconnexion">Déconnexion</a>
             <?php endif; ?>

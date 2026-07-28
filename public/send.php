@@ -55,6 +55,15 @@ if ($to !== 'qbit' && !isset($config['arr'][$to])) {
 $token    = (string) ($_POST['token'] ?? '');
 $category = trim((string) ($_POST['category'] ?? '')) ?: null;
 
+// Une catégorie imposée à un compte prime sur celle choisie côté client :
+// sinon la séparation des téléchargements ne tiendrait qu'à la bonne volonté
+// du navigateur.
+$store   = new Store($config['db_file']);
+$imposee = $store->userCategory(current_user());
+if ($imposee !== '') {
+    $category = $imposee;
+}
+
 if ($token === '') {
     json_response(['error' => 'Requête invalide.'], 400);
 }
@@ -99,7 +108,7 @@ if ($to === 'qbit') {
         // Mémorisé côté serveur : qBittorrent renomme les torrents et, sans
         // magnet, aucun hash n'est connu avant téléchargement. Sans cette trace,
         // impossible de savoir plus tard qu'on a déjà pris cette release.
-        (new Store($config['db_file']))->recordSend(
+        $store->recordSend(
             trim((string) ($_POST['title'] ?? '')),
             trim((string) ($_POST['indexer'] ?? '')),
             'qbit',
@@ -136,7 +145,7 @@ try {
         trim((string) ($_POST['indexer'] ?? '')),
         trim((string) ($_POST['publishDate'] ?? '')),
     );
-    (new Store($config['db_file']))->recordSend(
+    $store->recordSend(
         $title,
         trim((string) ($_POST['indexer'] ?? '')),
         $to,

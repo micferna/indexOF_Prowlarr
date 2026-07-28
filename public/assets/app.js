@@ -14,7 +14,7 @@ const CATS = [
 ];
 
 const COLUMNS = [
-    { key: "title", label: "Release", sortable: true },
+    { key: "title", label: "Release", sortable: true, alt: "relevance", altLabel: "Pertinence" },
     { key: "size", label: "Taille", sortable: true, num: true },
     { key: "seeders", label: "Seed", sortable: true, num: true },
     { key: "publishDate", label: "Âge", sortable: true, num: true },
@@ -56,7 +56,34 @@ function svgIcon(d) {
 
 const QUALITY_ORDER = ["2160p", "1080p", "720p", "480p", "REMUX", "BluRay", "WEB", "HDTV",
     "x265", "x264", "AV1", "HDR", "DV", "Atmos", "DTS", "FLAC", "MULTI", "FR", "VOSTFR"];
-const SORTABLE = ["title", "size", "seeders", "leechers", "publishDate"];
+const SORTABLE = ["relevance", "title", "size", "seeders", "leechers", "publishDate"];
+
+/**
+ * Score de pertinence d'un titre pour une requête.
+ *
+ * Trier par date une recherche par mot-clé enterre la meilleure correspondance
+ * sous les dernières mises en ligne. On classe donc d'abord par proximité au
+ * terme cherché, les seeders départageant les ex æquo.
+ */
+function relevance(title, query) {
+    const t = normalizeName(title);
+    const q = normalizeName(query);
+    if (!q) return 0;
+
+    let score = 0;
+    if (t.includes(q)) score += 100;          // la requête entière est présente
+    if (t.startsWith(q)) score += 40;         // et en tête du titre
+
+    // Couverture : combien des mots demandés apparaissent.
+    const mots = query.trim().split(/\s+/).map(normalizeName).filter(Boolean);
+    if (mots.length) {
+        score += 60 * (mots.filter((m) => t.includes(m)).length / mots.length);
+    }
+    // À correspondance égale, un titre court est plus proche de la demande
+    // qu'un pack de trente épisodes qui la contient au passage.
+    score -= Math.min(25, t.length / 8);
+    return score;
+}
 
 /* Tranches de taille. Choisir « entre 4 et 15 Go » est le premier geste quand
    une recherche mélange du REMUX à 70 Go et du WEB à 2 Go. Des tranches se
@@ -73,10 +100,10 @@ const SIZES = [
 const state = {
     query: "", days: 0, trackers: new Set(), cats: new Set(),
     mode: "search", safeMode: true,
-    sort: { field: "publishDate", dir: "desc" },
+    sort: { field: "relevance", dir: "desc" },
     facets: { minSeeders: 0, freeleech: false, quality: new Set(), sizes: new Set(), exclude: [] },
     results: [], rawResults: [], grouping: true,
-    total: 0, capped: false, page: 1, maskOn: false, loading: false,
+    total: 0, capped: false, fetched: 0, loadingMore: false, page: 1, maskOn: false, loading: false,
     qbit: false, qbitCategories: [], qbitCategory: "", arr: {},
     view: "search", health: [], transfersTab: "live", transferFilter: "all", transfers: [], history: [],
     qbitNames: new Set(), store: false, notify: false, saved: [],
@@ -354,6 +381,7 @@ async function runSearch() {
         state.results = groupResults(state.rawResults);
         state.total = data.total || state.rawResults.length;
         state.capped = !!data.capped;
+        state.fetched = state.rawResults.length;
         renderFacets();
         renderResults();
     } catch (e) {
@@ -425,6 +453,17 @@ function facetFiltered() {
 function sortResults(arr) {
     const { field, dir } = state.sort;
     const mul = dir === "asc" ? 1 : -1;
+    if (field === "relevance") {
+        // Sans requête (mode Top), la pertinence n'a pas de sens : on retombe
+        // sur la date, qui est l'intérêt de ce mode.
+        if (!state.query) return sortBy(arr, "publishDate", -1);
+        return [...arr].sort((a, b) =>
+            ((relevance(b.title, state.query) - relevance(a.title, state.query)) || (b.seeders - a.seeders)) * (dir === "asc" ? -1 : 1));
+    }
+    return sortBy(arr, field, mul);
+}
+
+function sortBy(arr, field, mul) {
     return [...arr].sort((a, b) => {
         if (field === "title") return a.title.localeCompare(b.title) * mul;
         let av = a[field], bv = b[field];
@@ -621,7 +660,7 @@ function renderResults() {
         btn.addEventListener("click", () => { setDays(0); state.page = 1; runSearch(); });
         right.append(btn);
     } else if (state.capped) {
-        right.append(el("span", { class: "muted", text: "Affine la recherche pour voir le reste" }));
+        right.append(el("span", { class: "muted", text: `${state.total - state.fetched} encore à charger` }));
     }
     const meta = el("div", { class: "meta-row" }, left, activeFilterChips(), right);
 
@@ -636,7 +675,12 @@ function renderResults() {
     // s'enclenche tout seul dès qu'il approche du bas : on fait défiler, ça
     // charge.
     let more = null;
-    if (shown.length < all.length) {
+    if (shown.length >= all.length && state.capped) {
+        more = el("button", { type: "button", class: "load-more",
+            text: `Charger la suite (${state.total - state.fetched} restants)` });
+        more.addEventListener("click", loadMore);
+        parts.push(more);
+    } else if (shown.length < all.length) {
         more = el("button", { type: "button", class: "load-more",
             text: `Charger plus (${all.length - shown.length} restants)` });
         more.addEventListener("click", loadMore);
@@ -648,8 +692,52 @@ function renderResults() {
 }
 
 function loadMore() {
-    state.page++;
-    renderResults();
+    const affichees = state.page * PAGE_SIZE;
+    // Tant qu'il reste des lignes déjà reçues, on les déplie sans rien demander.
+    if (affichees < visibleResults().length || !state.capped) {
+        state.page++;
+        renderResults();
+        return;
+    }
+    fetchMore();
+}
+
+/**
+ * Étend la liste depuis le serveur. Jusqu'ici on s'arrêtait à RESULT_LIMIT en
+ * conseillant d'affiner : le reste des résultats existait mais restait
+ * inaccessible.
+ */
+async function fetchMore() {
+    if (state.loadingMore || !state.capped) return;
+    state.loadingMore = true;
+
+    const p = new URLSearchParams({ action: "search", days: state.days, offset: state.fetched });
+    if (state.mode === "top") p.set("top", "1"); else p.set("q", state.query);
+    if (!state.safeMode) p.set("safe", "0");
+    if (state.trackers.size) p.set("trackers", [...state.trackers].join(","));
+    if (state.cats.size) p.set("cats", [...state.cats].join(","));
+
+    try {
+        const res = await fetch("api.php?" + p.toString());
+        const data = await res.json();
+        if (res.status === 401) { location.href = "login.php"; return; }
+        if (!data.error && (data.results || []).length) {
+            state.rawResults = state.rawResults.concat(data.results);
+            state.fetched = state.rawResults.length;
+            state.results = groupResults(state.rawResults);
+            state.capped = !!data.capped;
+            state.page++;
+            renderFacets();
+            renderResults();
+        } else {
+            state.capped = false;
+            renderResults();
+        }
+    } catch (e) {
+        toast("Impossible de charger la suite");
+    } finally {
+        state.loadingMore = false;
+    }
 }
 
 /* Défilement infini : on surveille le bouton de fin de liste. */
@@ -669,18 +757,22 @@ function observeMore(btn) {
 function renderHeadRow() {
     const tr = el("tr");
     for (const col of COLUMNS) {
-        const th = el("th", { text: col.label, class: col.num ? "num" : (col.cls || "") });
+        // La première colonne bascule entre « Release » (tri alphabétique) et
+        // « Pertinence » : deux tris pour un même en-tête, alternés au clic.
+        const actifAlt = col.alt && state.sort.field === col.alt;
+        const th = el("th", { text: actifAlt ? col.altLabel : col.label, class: col.num ? "num" : (col.cls || "") });
         if (col.sortable) {
             th.classList.add("sortable");
             th.append(el("span", { class: "arrow", text: "▲" }));
-            const active = state.sort.field === col.key;
+            const active = state.sort.field === col.key || actifAlt;
             if (active) th.classList.add("sort-active", state.sort.dir === "desc" ? "sort-desc" : "sort-asc");
             // Tri accessible au clavier (Entrée / Espace) et annoncé aux lecteurs d'écran.
             th.tabIndex = 0;
             th.setAttribute("aria-sort", active ? (state.sort.dir === "asc" ? "ascending" : "descending") : "none");
-            th.addEventListener("click", () => toggleSort(col.key));
+            const cible = () => (col.alt && state.sort.field === col.key ? col.alt : col.key);
+            th.addEventListener("click", () => toggleSort(cible()));
             th.addEventListener("keydown", (e) => {
-                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSort(col.key); }
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSort(cible()); }
             });
         }
         tr.append(th);
@@ -873,7 +965,8 @@ function renderActions(r) {
     let any = false;
 
     if (r.dl) {
-        wrap.append(el("a", { class: "act act-dl", href: torrentHref(r.dl), title: "Télécharger le .torrent" },
+        wrap.append(el("a", { class: "act act-dl", href: torrentHref(r.dl),
+            title: "Télécharger le .torrent", "aria-label": "Télécharger le .torrent" },
             svgIcon(ICONS.download)));
         // Savoir ce qu'il y a dedans avant de le prendre.
         wrap.append(makeBtn("act act-files", ICONS.files, "Voir le contenu du .torrent",
@@ -881,7 +974,8 @@ function renderActions(r) {
         any = true;
     }
     if (r.magnet) {
-        wrap.append(el("a", { class: "act act-magnet", href: r.magnet, title: "Ouvrir le magnet" },
+        wrap.append(el("a", { class: "act act-magnet", href: r.magnet,
+            title: "Ouvrir le magnet", "aria-label": "Ouvrir le lien magnet" },
             svgIcon(ICONS.magnet)));
         wrap.append(makeBtn("act act-copy", ICONS.copy, "Copier le magnet", () => copyText(r.magnet)));
         any = true;
@@ -903,7 +997,9 @@ function renderActions(r) {
 }
 
 function makeBtn(cls, icon, title, onClick) {
-    const b = el("button", { type: "button", class: cls, title });
+    // `title` n'est qu'une infobulle : les lecteurs d'écran ne l'annoncent pas
+    // de façon fiable. Sans aria-label, ces boutons sont muets.
+    const b = el("button", { type: "button", class: cls, title, "aria-label": title });
     b.append(svgIcon(icon));
     b.addEventListener("click", () => onClick(b));
     return b;
@@ -1234,11 +1330,13 @@ function renderUsers() {
     creer.addEventListener("click", creation);
     mdp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); creation(); } });
     const form = el("div", { class: "users-add" }, nom, mdp, creer);
+    const sauvegarde = renderBackup();
 
     if (!state.users.length) {
         resultsBox.replaceChildren(meta, form, el("div", { class: "state" },
             el("span", { class: "emoji", text: "👤" }),
-            "Aucun compte nommé. Tout le monde entre avec le mot de passe partagé."));
+            "Aucun compte nommé. Tout le monde entre avec le mot de passe partagé."),
+            sauvegarde);
         return;
     }
 
@@ -1282,6 +1380,22 @@ function renderUsers() {
             : `${permis.size} indexeur(s) autorisé(s)` }));
         cell.append(liste);
 
+        // Catégorie qBittorrent imposée : les téléchargements de ce compte
+        // atterrissent dans son propre dossier au lieu du tas commun.
+        const cat = el("input", { type: "text", class: "saved-input cat-input", maxlength: "40",
+            placeholder: "Catégorie qBittorrent (facultatif)",
+            "aria-label": `Catégorie qBittorrent de ${u.name}` });
+        cat.value = u.category || "";
+        const enregistrer = async () => {
+            const { ok, data } = await postForm("users.php",
+                { op: "category", id: u.id, category: cat.value });
+            toast(ok ? data.message : (data.error || "Échec"));
+            loadUsers();
+        };
+        cat.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); enregistrer(); } });
+        cat.addEventListener("blur", () => { if (cat.value !== (u.category || "")) enregistrer(); });
+        cell.append(el("div", { class: "user-cat" }, cat));
+
         const actions = el("div", { class: "actions" });
         const suppr = makeBtn("act act-del", ICONS.trash, "Supprimer ce compte", async (btn) => {
             btn.disabled = true;
@@ -1301,7 +1415,51 @@ function renderUsers() {
             el("th", { class: "num", text: "" }))),
         el("tbody", {}, ...rows));
 
-    resultsBox.replaceChildren(meta, form, el("div", { class: "table-wrap" }, table));
+    resultsBox.replaceChildren(meta, form, el("div", { class: "table-wrap" }, table), sauvegarde);
+}
+
+/**
+ * Sauvegarde et restauration de la base.
+ *
+ * Le fichier contient les empreintes de mots de passe et les jetons de flux :
+ * il se traite comme un secret, et la restauration est annoncée pour ce qu'elle
+ * est — un remplacement, pas une fusion.
+ */
+function renderBackup() {
+    const telecharger = el("a", { class: "del-choice", href: "backup.php",
+        text: "Télécharger la sauvegarde" });
+    telecharger.setAttribute("download", "");
+
+    const champ = el("input", { type: "file", class: "saved-input", accept: ".sqlite,.db",
+        "aria-label": "Fichier de sauvegarde à restaurer" });
+    const restaurer = el("button", { type: "button", class: "del-choice danger",
+        text: "Restaurer" });
+
+    restaurer.addEventListener("click", async () => {
+        const fichier = champ.files && champ.files[0];
+        if (!fichier) { toast("Choisissez d'abord un fichier."); return; }
+        if (!confirm("Remplacer comptes, recherches et historique par cette sauvegarde ?")) return;
+        restaurer.disabled = true;
+        const corps = new FormData();
+        corps.append("fichier", fichier);
+        try {
+            const res = await fetch("backup.php", {
+                method: "POST", headers: { "X-CSRF-Token": CSRF }, body: corps,
+            });
+            const data = await res.json().catch(() => ({}));
+            toast(res.ok && data.ok ? data.message : (data.error || "Restauration refusée"));
+            if (res.ok && data.ok) { champ.value = ""; loadUsers(); }
+        } catch (e) {
+            toast("Restauration impossible.");
+        }
+        restaurer.disabled = false;
+    });
+
+    return el("div", { class: "backup" },
+        el("div", { class: "backup-title", text: "Sauvegarde" }),
+        el("div", { class: "muted",
+            text: "Comptes, recherches enregistrées, historique et jetons de flux. Gardez ce fichier autant que votre mot de passe : il les contient." }),
+        el("div", { class: "backup-row" }, telecharger, champ, restaurer));
 }
 
 if (accountBtn) {

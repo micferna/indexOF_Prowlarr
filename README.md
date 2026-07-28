@@ -43,6 +43,10 @@ docker compose up -d --build
 
 > `PROWLARR_BASE_URL` vaut `http://prowlarr:9696` : les services communiquent par leur nom sur le réseau Docker.
 
+S'il manque un réglage, l'app ne démarre pas et affiche à la place un écran qui
+les liste tous, avec le remède pour chacun. Elle ne lit que la configuration :
+elle n'en écrit jamais depuis le navigateur.
+
 ## L'interface
 
 Un nom de release, c'est `The.Matrix.1999.REMASTERED.MULTi.2160p.BluRay.REMUX.DV.HDR-REBiRTH`.
@@ -51,6 +55,9 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
 écrits, le groupe de release s'efface. Pas de pastilles recopiées sous chaque ligne.
 
 - **Recherche dynamique** sans rechargement, état partageable par URL (`?q=…&days=…&trackers=…`).
+- **Tri par pertinence** par défaut sur une recherche : le titre qui contient votre
+  requête entière passe devant celui qui n'en a qu'un mot, avant même le nombre de
+  seeders. Les autres tris restent à un clic, et le vôtre est mémorisé.
 - **Top** : les derniers uploads de tous vos trackers, sans taper de requête.
 - **Liseré de qualité** à gauche de chaque ligne : la résolution d'une liste se lit verticalement.
 - **Filtres** réunis dans un seul panneau — période, catégories, indexeurs, puis affinage
@@ -221,6 +228,32 @@ liste des indexeurs, statistiques, flux RSS et veille Discord — y compris ceux
 qui s'exécutent sans session, où c'est le propriétaire de la recherche qui
 fait autorité. Forcer des identifiants d'indexeur dans l'URL ne contourne rien :
 la demande est intersectée avec la liste autorisée, jamais réunie.
+
+Supprimer un compte — ou en effacer la trace en restaurant une sauvegarde —
+ferme aussitôt sa session ouverte.
+
+### Une catégorie qBittorrent par compte
+
+Dans la vue **Comptes**, donnez une catégorie à chacun (`alice-dl`, `bob-dl`).
+Ses téléchargements y atterrissent quoi qu'il demande : la catégorie du compte
+prime sur celle choisie dans le navigateur. Laissez le champ vide pour lui
+laisser le choix. Réglez le dossier de destination correspondant dans
+qBittorrent (*Catégories → Enregistrer dans*).
+
+## Sauvegarde
+
+Depuis la vue **Comptes**, « Télécharger la sauvegarde » produit un instantané
+cohérent de la base : comptes, recherches enregistrées, historique et jetons de
+flux. Il est pris par `VACUUM INTO`, donc valable même pendant une écriture —
+copier `indexof.sqlite` à chaud ne l'est pas.
+
+**Ce fichier contient les empreintes des mots de passe et les jetons de flux
+RSS. Traitez-le comme un mot de passe.**
+
+La restauration **remplace** la base, elle ne la fusionne pas. Le fichier envoyé
+est refusé s'il n'est pas une base indexOF, et la base précédente est conservée
+à côté (`indexof.sqlite.avant-restauration`) au cas où. Réservé à
+l'administrateur.
 
 ## Sécurité
 

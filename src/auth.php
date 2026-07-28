@@ -18,6 +18,8 @@ declare(strict_types=1);
  * Le jeton CSRF est toujours émis : il protège les endpoints d'écriture.
  */
 
+require_once __DIR__ . '/Store.php';
+
 /** Démarre la session avec des paramètres de cookie durcis. */
 function start_session(): void
 {
@@ -134,6 +136,24 @@ function verify_csrf(?string $token): bool
     return $token !== null && $token !== '' && hash_equals(csrf_token(), $token);
 }
 
+/** Ferme la session en cours (déconnexion, ou compte disparu). */
+function close_session(): void
+{
+    $_SESSION = [];
+    if (ini_get('session.use_cookies')) {
+        $p = session_get_cookie_params();
+        setcookie((string) session_name(), '', [
+            'expires'  => time() - 42000,
+            'path'     => $p['path'],
+            'domain'   => $p['domain'],
+            'secure'   => $p['secure'],
+            'httponly' => $p['httponly'],
+            'samesite' => $p['samesite'],
+        ]);
+    }
+    session_destroy();
+}
+
 /**
  * Garde d'accès. $mode = 'html' (redirige vers le login) ou 'json' (401).
  *
@@ -143,7 +163,17 @@ function require_auth(array $config, string $mode = 'html'): void
 {
     start_session();
     if (is_authenticated($config)) {
-        return;
+        // Un compte supprimé — ou effacé par une restauration de sauvegarde —
+        // ne doit pas continuer à circuler avec sa session ouverte. Le
+        // cloisonnement le priverait déjà de tout indexeur, mais laisser vivre
+        // une session sans compte derrière est une incohérence, pas une
+        // protection.
+        $nom = current_user();
+        if ($nom !== '' && !(new Store($config['db_file']))->userExists($nom)) {
+            close_session();
+        } else {
+            return;
+        }
     }
     if ($mode === 'json') {
         http_response_code(401);

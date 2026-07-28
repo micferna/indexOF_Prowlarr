@@ -119,16 +119,16 @@ function map_result(array $r, string $secret): array
  * tableau = uniquement ceux-là. C'est une frontière de sécurité — la sélection
  * demandée par le client est INTERSECTÉE avec elle, jamais réunie.
  *
- * @param array{query?:string,top?:bool,days?:int,cats?:string,trackers?:string,safe?:bool,allow?:array<int,int>|null,user?:string|null} $params
+ * @param array{query?:string,top?:bool,days?:int,cats?:string,trackers?:string,safe?:bool,offset?:int,allow?:array<int,int>|null,user?:string|null} $params
  * @param array<string,mixed> $config
- * @return array{query:string,total:int,count:int,capped:bool,results:array<int,array<string,mixed>>}
+ * @return array{query:string,total:int,offset:int,count:int,capped:bool,results:array<int,array<string,mixed>>}
  */
 function perform_search(ProwlarrClient $client, ?Store $store, array $config, array $params): array
 {
     $top   = (bool) ($params['top'] ?? false);
     $query = trim((string) ($params['query'] ?? ''));
 
-    $empty = ['query' => $query, 'total' => 0, 'count' => 0, 'capped' => false, 'results' => []];
+    $empty = ['query' => $query, 'total' => 0, 'offset' => 0, 'count' => 0, 'capped' => false, 'results' => []];
     if ($query === '' && !$top) {
         return $empty;
     }
@@ -182,8 +182,11 @@ function perform_search(ProwlarrClient $client, ?Store $store, array $config, ar
         $all = array_values(array_filter($all, static fn (array $r): bool => !is_adult_result($r)));
     }
 
-    $total = count($all);
-    $page  = array_slice($all, 0, $limit);
+    // Prowlarr renvoie l'ensemble d'un coup (et on le met en cache) : paginer
+    // revient à découper ce qu'on a déjà, sans nouvelle requête amont.
+    $total  = count($all);
+    $offset = max(0, (int) ($params['offset'] ?? 0));
+    $page   = array_slice($all, $offset, $limit);
 
     // Marquage des releases déjà envoyées : rapprochement sur le titre que NOUS
     // avons enregistré, donc exact — contrairement au nom que le client de
@@ -201,8 +204,10 @@ function perform_search(ProwlarrClient $client, ?Store $store, array $config, ar
     return [
         'query'   => $query,
         'total'   => $total,
+        'offset'  => $offset,
         'count'   => count($results),
-        'capped'  => $total > $limit,
+        // Reste-t-il quelque chose après cette tranche ?
+        'capped'  => $total > $offset + count($results),
         'results' => $results,
     ];
 }
