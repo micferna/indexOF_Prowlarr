@@ -1435,10 +1435,25 @@ function renderBackup() {
     const restaurer = el("button", { type: "button", class: "del-choice danger",
         text: "Restaurer" });
 
+    // Deux temps, comme les autres suppressions de l'app : une restauration
+    // remplace la base, elle ne la fusionne pas.
+    let confirmee = false;
+    const repos = () => {
+        confirmee = false;
+        restaurer.textContent = "Restaurer";
+        restaurer.classList.remove("confirm");
+    };
+    champ.addEventListener("change", repos);
+
     restaurer.addEventListener("click", async () => {
         const fichier = champ.files && champ.files[0];
         if (!fichier) { toast("Choisissez d'abord un fichier."); return; }
-        if (!confirm("Remplacer comptes, recherches et historique par cette sauvegarde ?")) return;
+        if (!confirmee) {
+            confirmee = true;
+            restaurer.textContent = "Confirmer le remplacement";
+            restaurer.classList.add("confirm");
+            return;
+        }
         restaurer.disabled = true;
         const corps = new FormData();
         corps.append("fichier", fichier);
@@ -1453,6 +1468,7 @@ function renderBackup() {
             toast("Restauration impossible.");
         }
         restaurer.disabled = false;
+        repos();
     });
 
     return el("div", { class: "backup" },
