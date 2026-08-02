@@ -100,7 +100,9 @@ function config_incomplete(array $manques): never
  *   api_key:string, base_url:string, secret:string,
  *   timeout:int, qbit_timeout:int, cache_ttl:int, cache_dir:string,
  *   password:string, limit:int,
- *   db_file:string, qbit_url:string, qbit_user:string, qbit_pass:string,
+ *   media_dir:string, stream_ttl:int, public_url:string,
+ *   transcode:bool, transcode_max:int, transcode_dir:string, ffmpeg:string, ffprobe:string,
+ *   data_dir:string, db_file:string, qbit_url:string, qbit_user:string, qbit_pass:string,
  *   arr:array<string,array{label:string,api:string,url:string,key:string}>
  * }
  */
@@ -204,10 +206,39 @@ function load_config(): array
         'qbit_timeout' => max(1, (int) $get('QBITTORRENT_TIMEOUT', '15')),
         'cache_ttl'    => max(0, (int) $get('CACHE_TTL', '120')),
         'cache_dir'    => $get('CACHE_DIR', sys_get_temp_dir() . '/indexof_cache'),
-        // Base SQLite (historique d'envois, recherches enregistrées). Doit être
-        // sur un volume persistant : /tmp est en tmpfs. Inaccessible = les
-        // fonctionnalités concernées disparaissent, l'app fonctionne quand même.
-        'db_file'      => (string) $get('DATA_DIR', '/var/lib/indexof') . '/indexof.sqlite',
+        // Bibliothèque : le dossier où le client de téléchargement dépose les
+        // fichiers, monté en lecture seule. Absent ou vide = la vue disparaît
+        // de l'interface, le reste continue de fonctionner.
+        'media_dir'    => rtrim((string) $get('MEDIA_DIR', '/media'), '/'),
+        // Durée de validité d'un lien de lecture. Il vaut autorisation à lui
+        // seul (VLC sur une télévision n'a pas de session), donc il expire —
+        // assez long pour un film et ses pauses, pas plus.
+        'stream_ttl'   => max(600, (int) $get('STREAM_TTL', '43200')),
+        // Adresse de l'application VUE DEPUIS LE RÉSEAU LOCAL. C'est elle qu'on
+        // donne au téléviseur : il ira chercher la vidéo lui-même, et il ne
+        // saura pas quoi faire d'un « localhost ». Vide = déduite de la requête,
+        // ce qui est juste dès qu'on n'accède pas à l'app depuis la machine elle-même.
+        'public_url'   => rtrim((string) $get('PUBLIC_BASE_URL', ''), '/'),
+        // Conversion à la volée quand l'appareil ne sait pas lire le fichier.
+        // À 0, la lecture reste directe : ce qui passe passe, le reste ne passe
+        // pas — mais aucun processeur n'est mobilisé.
+        'transcode'    => $get('TRANSCODE', '1') !== '0',
+        // Plafond de conversions simultanées. Chacune occupe un worker php-fpm
+        // et un cœur : sans limite, trois lectures suffisent à figer la machine.
+        'transcode_max' => max(1, (int) $get('TRANSCODE_MAX', '2')),
+        // Espace de travail des segments HLS. Inscriptible, sur un disque avec
+        // de l'espace : un film converti pèse autant que l'original.
+        'transcode_dir' => rtrim((string) $get('TRANSCODE_DIR_CONTAINER', '/transcode'), '/'),
+        'ffmpeg'       => (string) $get('FFMPEG_BIN', 'ffmpeg'),
+        'ffprobe'      => (string) $get('FFPROBE_BIN', 'ffprobe'),
+        // Volume persistant : base SQLite, fiches de médias et affiches. /tmp
+        // n'irait pas — il est en tmpfs, donc en RAM et vidé à chaque
+        // redémarrage, alors qu'une affiche se garde des semaines.
+        'data_dir'     => rtrim((string) $get('DATA_DIR', '/var/lib/indexof'), '/'),
+        // Base SQLite (historique d'envois, recherches enregistrées).
+        // Inaccessible = les fonctionnalités concernées disparaissent,
+        // l'app fonctionne quand même.
+        'db_file'      => rtrim((string) $get('DATA_DIR', '/var/lib/indexof'), '/') . '/indexof.sqlite',
         // Authentification (mot de passe unique). Vide => exige AUTH_DISABLED=1.
         'password'     => $password,
         // Limite de résultats par page (pagination "charger plus").

@@ -147,6 +147,18 @@ final class Store
             $pdo->exec('ALTER TABLE users ADD COLUMN category TEXT NOT NULL DEFAULT ""');
         }
 
+        // Fichiers masqués de la bibliothèque. Ce n'est PAS une suppression :
+        // le fichier reste sur le disque et continue d'être partagé. C'est la
+        // distinction qui compte sur un tracker privé — on veut désencombrer sa
+        // vue sans casser son ratio.
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS hidden (
+                rel        TEXT PRIMARY KEY,
+                user       TEXT NOT NULL DEFAULT "",
+                created_at INTEGER NOT NULL
+            )'
+        );
+
         // Releases déjà signalées, pour ne notifier que la nouveauté.
         $pdo->exec(
             'CREATE TABLE IF NOT EXISTS seen (
@@ -647,6 +659,48 @@ final class Store
             // Sans conséquence : la connexion est déjà validée.
         }
         return (string) $row['name'];
+    }
+
+    /**
+     * Chemins masqués de la bibliothèque.
+     *
+     * @return array<string,true> indexé par chemin, pour un test en O(1)
+     */
+    public function hiddenFiles(): array
+    {
+        $pdo = $this->db();
+        if ($pdo === null) {
+            return [];
+        }
+        try {
+            $rows = $pdo->query('SELECT rel FROM hidden');
+            $out = [];
+            foreach ($rows === false ? [] : $rows->fetchAll() as $r) {
+                $out[(string) $r['rel']] = true;
+            }
+            return $out;
+        } catch (Throwable $e) {
+            return [];
+        }
+    }
+
+    /** Masque ou réaffiche un fichier. Le fichier lui-même n'est jamais touché. */
+    public function setHidden(string $rel, bool $hidden, string $user = ''): void
+    {
+        $pdo = $this->db();
+        if ($pdo === null || $rel === '') {
+            return;
+        }
+        try {
+            if ($hidden) {
+                $pdo->prepare('INSERT OR REPLACE INTO hidden (rel, user, created_at) VALUES (?, ?, ?)')
+                    ->execute([$rel, $user, time()]);
+            } else {
+                $pdo->prepare('DELETE FROM hidden WHERE rel = ?')->execute([$rel]);
+            }
+        } catch (Throwable $e) {
+            error_log('[indexof] masquage impossible : ' . $e->getMessage());
+        }
     }
 
     public function deleteSearch(int $id): void

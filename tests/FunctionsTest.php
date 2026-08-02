@@ -27,6 +27,44 @@ final class FunctionsTest extends TestCase
         $this->assertSame('#', safe_url('https://x.com/', ['magnet']));
     }
 
+    /**
+     * L'envoi vers un téléviseur n'accepte que de vraies adresses de réseau
+     * domestique. « Non publique » serait trop large : cette catégorie contient
+     * la boucle locale et 169.254.169.254, le point de métadonnées des clouds.
+     */
+    public function testIpIsLanNAccepteQueLesPlagesDomestiques(): void
+    {
+        foreach (['192.168.1.42', '10.0.0.7', '172.16.5.1', '172.31.255.254', 'fd12::1'] as $ip) {
+            $this->assertTrue(ip_is_lan($ip), "{$ip} devrait être acceptée");
+        }
+        foreach ([
+            '8.8.8.8', '1.1.1.1',              // Internet
+            '127.0.0.1', '::1',                // boucle locale
+            '169.254.169.254', '169.254.1.1',  // lien-local / métadonnées cloud
+            '172.15.0.1', '172.32.0.1',        // juste en dehors de 172.16/12
+            '0.0.0.0', '255.255.255.255',
+            'pas-une-ip', '', 'localhost',
+        ] as $ip) {
+            $this->assertFalse(ip_is_lan($ip), "{$ip} devrait être refusée");
+        }
+    }
+
+    /**
+     * Le Cast donne une URL au téléviseur, qui va chercher la vidéo lui-même :
+     * une adresse de boucle locale le renverrait chez lui.
+     */
+    public function testCastBaseReachable(): void
+    {
+        $this->assertFalse(cast_base_reachable('http://127.0.0.1:8080'));
+        $this->assertFalse(cast_base_reachable('http://localhost:8080'));
+        $this->assertFalse(cast_base_reachable('http://[::1]:8080'));
+        $this->assertFalse(cast_base_reachable('http://127.1.2.3:8080'));
+        $this->assertFalse(cast_base_reachable(''));
+
+        $this->assertTrue(cast_base_reachable('http://192.168.1.50:8080'));
+        $this->assertTrue(cast_base_reachable('https://indexof.exemple.fr'));
+    }
+
     public function testIpIsPublicBlocksPrivateAndReserved(): void
     {
         $this->assertTrue(ip_is_public('8.8.8.8'));

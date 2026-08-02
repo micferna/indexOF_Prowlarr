@@ -5,9 +5,10 @@ declare(strict_types=1);
 /**
  * API JSON consommée par le front (recherche dynamique sans rechargement).
  *
- *   GET api.php?action=status
- *   GET api.php?action=indexers
- *   GET api.php?action=search&q=...&days=1&trackers=1,2&cats=2000,5000
+ *   GET  api.php?action=status
+ *   GET  api.php?action=indexers
+ *   GET  api.php?action=search&q=...&days=1&trackers=1,2&cats=2000,5000
+ *   POST api.php?action=meta   items=[{title,kind,imdbId,tmdbId}, …]
  *
  * Les liens de téléchargement sont scellés (chiffrés) côté serveur : les URLs
  * Prowlarr — qui contiennent la clé API — ne quittent jamais le backend.
@@ -22,6 +23,11 @@ require_once __DIR__ . '/../src/Store.php';
 require_once __DIR__ . '/../src/Search.php';
 require_once __DIR__ . '/../src/TorrentFetcher.php';
 require_once __DIR__ . '/../src/Bencode.php';
+require_once __DIR__ . '/../src/Metadata.php';
+require_once __DIR__ . '/../src/Library.php';
+require_once __DIR__ . '/../src/CastClient.php';
+require_once __DIR__ . '/../src/Transcoder.php';
+require_once __DIR__ . '/../src/Hls.php';
 
 $config = load_config();
 
@@ -99,6 +105,16 @@ try {
             'admin'          => is_admin($config),
             // Sans webhook, la cloche des recherches n'aurait aucun effet.
             'notify'         => trim((string) (getenv('DISCORD_WEBHOOK') ?: '')) !== '',
+            // Affiches et résumés : ils viennent de Radarr/Sonarr. Sans eux, pas
+            // de fiche à afficher — et le bouton n'a pas lieu d'exister.
+            'posters'        => MetadataClient::isConfigured($config['arr']),
+            // Bibliothèque : sans dossier de téléchargements monté, il n'y a
+            // rien à lister ni à lire.
+            'library'        => (new Library($config['media_dir'], $config['cache_dir']))->available(),
+            // Conversion à la volée : sans elle, seuls les formats que le
+            // navigateur décode nativement sont proposés à la lecture.
+            'transcode'      => $config['transcode']
+                && (new Transcoder($config['ffmpeg'], $config['ffprobe']))->available(),
         ]);
     }
 
@@ -182,6 +198,294 @@ try {
             json_response(['error' => "Réservé à l'administrateur."], 403);
         }
         json_response(['users' => $store->users()]);
+    }
+
+    // Fiches des releases affichées : affiche, résumé, année, note. C'est ce qui
+    // évite d'ouvrir la page du tracker — donc de s'y connecter — juste pour
+    // savoir de quel film il s'agit.
+    //
+    // En POST parce qu'un lot de soixante titres de release ne tient pas dans
+    // une URL, et derrière le CSRF comme tout ce qui n'est pas une lecture
+    // simple. Rien n'est écrit hors du cache.
+    if ($action === 'meta') {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            json_response(['error' => 'Méthode non autorisée.'], 405);
+        }
+        if (!verify_csrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($_POST['csrf'] ?? null))) {
+            json_response(['error' => 'Jeton CSRF invalide.'], 403);
+        }
+        if (!MetadataClient::isConfigured($config['arr'])) {
+            json_response(['meta' => [], 'enabled' => false]);
+        }
+
+        $brut = json_decode((string) file_get_contents('php://input'), true);
+        if (!is_array($brut)) {
+            $brut = json_decode((string) ($_POST['items'] ?? ''), true);
+        }
+        $items = [];
+        // Plafond : un lot borne la charge sur Radarr/Sonarr, et le front n'en
+        // demande de toute façon que ce qui est à l'écran.
+        foreach (array_slice(is_array($brut) ? $brut : [], 0, 60) as $entree) {
+            if (!is_array($entree) || !isset($entree['title'])) {
+                continue;
+            }
+            $items[] = [
+                'title'  => mb_substr((string) $entree['title'], 0, 300),
+                'kind'   => in_array($entree['kind'] ?? null, ['movie', 'tv'], true) ? (string) $entree['kind'] : '',
+                'imdbId' => (string) ($entree['imdbId'] ?? ''),
+                'tmdbId' => (int) ($entree['tmdbId'] ?? 0),
+            ];
+        }
+        // (object) et non [] : un tableau PHP vide s'encode en `[]`, et un
+        // consommateur qui attend un dictionnaire indexé par titre s'y casse.
+        if ($items === []) {
+            json_response(['meta' => (object) [], 'enabled' => true]);
+        }
+
+        $meta = new MetadataClient(
+            $config['arr'],
+            $config['secret'],
+            $config['data_dir'] . '/meta',
+            min(15, (int) $config['timeout']),
+        );
+        // Idem : les titres servent de clés, et PHP transforme en tableau tout
+        // dictionnaire dont les clés se trouvent être des entiers consécutifs.
+        json_response(['meta' => (object) $meta->lookupMany($items), 'enabled' => true]);
+    }
+
+    // Bibliothèque : ce que le client de téléchargement a posé sur le disque.
+    // Chaque entrée porte son lien de lecture, scellé et daté — c'est lui qui
+    // sert d'autorisation à VLC, qui n'a pas de session.
+    if ($action === 'library') {
+        $library = new Library($config['media_dir'], $config['cache_dir']);
+        if (!$library->available()) {
+            json_response(['files' => [], 'enabled' => false]);
+        }
+
+        // Les fichiers masqués n'apparaissent plus, sauf demande explicite —
+        // c'est ce qui permet de les réafficher.
+        $masques = $store->hiddenFiles();
+        $tout = ((string) ($_GET['all'] ?? '')) === '1';
+
+        $fichiers = [];
+        foreach ($library->scan() as $f) {
+            $cache = isset($masques[$f['rel']]);
+            if ($cache && !$tout) {
+                continue;
+            }
+            $f['hidden'] = $cache;
+            // Le dossier porte souvent le nom de la release là où le fichier ne
+            // porte qu'un numéro d'épisode : c'est le meilleur candidat pour
+            // retrouver l'affiche.
+            $f['title'] = $f['folder'] !== '' ? $f['folder'] : $f['name'];
+            $f['stream'] = seal_url('media|' . $f['rel'], $config['secret'], $config['stream_ttl']);
+            unset($f['rel']);
+            $fichiers[] = $f;
+        }
+        json_response([
+            'files'   => $fichiers,
+            'enabled' => true,
+            'hiddenCount' => count($masques),
+            // Le lien vaut autorisation : l'interface doit pouvoir dire combien
+            // de temps il reste valable avant d'être recopié dans une télévision.
+            'ttl'     => (int) $config['stream_ttl'],
+        ]);
+    }
+
+    // Récepteurs Cast vus sur le réseau. La liste est produite par le service de
+    // découverte (bin/cast-discover.php), qui seul est sur le réseau de la
+    // maison — le multicast mDNS ne traverse pas le bridge Docker.
+    if ($action === 'cast-devices') {
+        $fichier = $config['data_dir'] . '/cast-devices.json';
+        $appareils = [];
+        $vu = null;
+        if (is_file($fichier)) {
+            $lu = json_decode((string) @file_get_contents($fichier), true);
+            if (is_array($lu)) {
+                $appareils = is_array($lu['devices'] ?? null) ? $lu['devices'] : [];
+                $vu = (int) ($lu['at'] ?? 0) ?: null;
+            }
+        }
+        json_response([
+            'devices' => array_values($appareils),
+            // null = le service de découverte n'a jamais écrit : il n'est pas
+            // démarré. C'est différent de « aucun appareil trouvé ».
+            'scannedAt' => $vu,
+            'base'      => cast_base_url($config),
+            // Un téléviseur ne sait pas joindre le « localhost » du serveur.
+            // Autant le dire avant que l'utilisateur ne cherche pourquoi.
+            'reachable' => cast_base_reachable(cast_base_url($config)),
+        ]);
+    }
+
+    // Envoi d'une vidéo vers un récepteur. POST + CSRF : c'est une action, pas
+    // une lecture, et elle allume une télévision.
+    if ($action === 'cast') {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            json_response(['error' => 'Méthode non autorisée.'], 405);
+        }
+        if (!verify_csrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($_POST['csrf'] ?? null))) {
+            json_response(['error' => 'Jeton CSRF invalide.'], 403);
+        }
+
+        $hote = trim((string) ($_POST['host'] ?? ''));
+        // L'hôte vient du client : on n'accepte qu'une adresse IP littérale, et
+        // seulement dans une plage de réseau domestique. Un nom à résoudre, une
+        // IP publique ou une adresse réservée feraient de cet endpoint un
+        // scanner de ports à la demande — 169.254.169.254 en tête.
+        if (!ip_is_lan($hote)) {
+            json_response(['error' => 'Adresse de téléviseur invalide (réseau local attendu).'], 400);
+        }
+        $port = (int) ($_POST['port'] ?? 8009);
+        if ($port < 1 || $port > 65535) {
+            $port = 8009;
+        }
+
+        $commande = (string) ($_POST['command'] ?? '');
+        $client = new CastClient($hote, $port, min(12, (int) $config['timeout']));
+
+        try {
+            if (in_array($commande, ['PLAY', 'PAUSE', 'STOP'], true)) {
+                $client->control($commande);
+                json_response(['ok' => true, 'message' => 'Commande envoyée.']);
+            }
+
+            // Lecture : la cible vient d'un jeton scellé par nous, jamais d'une
+            // URL fournie par le client.
+            $claim = open_url((string) ($_POST['token'] ?? ''), $config['secret']);
+            if ($claim === null || !str_starts_with($claim, 'media|')) {
+                json_response(['error' => 'Lien de lecture invalide ou expiré.'], 403);
+            }
+            $library = new Library($config['media_dir'], $config['cache_dir']);
+            $fichier = $library->resolve(substr($claim, 6));
+            if ($fichier === null) {
+                json_response(['error' => 'Fichier introuvable.'], 404);
+            }
+
+            $base = cast_base_url($config);
+            if (!cast_base_reachable($base)) {
+                json_response([
+                    'error' => "Le téléviseur ne pourra pas atteindre l'application à l'adresse « {$base} ». "
+                        . "Renseignez PUBLIC_BASE_URL avec l'adresse de l'app sur votre réseau local.",
+                ], 409);
+            }
+
+            // `p=cast` : le serveur décidera, sur les codecs réels, s'il faut
+            // convertir. Quand il convertit, la sortie est du MP4 — c'est donc
+            // ce type qu'on annonce au téléviseur, pas celui du fichier source.
+            $transcoder = new Transcoder($config['ffmpeg'], $config['ffprobe']);
+            $convertit = $config['transcode'] && $transcoder->available()
+                && $transcoder->decide($transcoder->probe($fichier['path']), $fichier['ext'], 'cast') !== 'direct';
+
+            // Quand il faut convertir, on passe par HLS : c'est le seul format
+            // qu'un récepteur Cast enchaîne réellement (cf. Transcoder::hlsCommand).
+            if ($convertit) {
+                // La session HLS est préparée ici, et c'est son adresse FINALE
+                // qu'on transmet : un récepteur Cast ne suit pas les
+                // redirections sur un média.
+                $mode = $transcoder->decide($transcoder->probe($fichier['path']), $fichier['ext'], 'cast');
+                $cle = hls_prepare($transcoder, $fichier, $mode, 'cast', $config);
+                if ($cle === null) {
+                    json_response(['error' => "La conversion n'a pas pu démarrer."], 502);
+                }
+                $url = hls_url($base, $cle);
+            } else {
+                $url = $base . '/stream.php?' . http_build_query(['t' => (string) $_POST['token']]);
+            }
+
+            $affiche = trim((string) ($_POST['poster'] ?? ''));
+            $affiche = $affiche !== ''
+                ? $base . '/poster.php?' . http_build_query(['t' => $affiche])
+                : '';
+
+            $app = $client->play(
+                $url,
+                $convertit ? 'application/x-mpegURL' : Library::mimeFor($fichier['ext']),
+                mb_substr(trim((string) ($_POST['title'] ?? '')), 0, 120),
+                $affiche
+            );
+            json_response(['ok' => true, 'message' => "Envoyé au téléviseur ({$app})."]);
+        } catch (CastError $e) {
+            json_response(['error' => $e->getMessage()], 502);
+        }
+    }
+
+    // Masquer un fichier de la bibliothèque — SANS y toucher. Il reste sur le
+    // disque et continue d'être partagé : sur un tracker privé, désencombrer sa
+    // vue ne doit pas coûter son ratio.
+    if ($action === 'library-hide') {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            json_response(['error' => 'Méthode non autorisée.'], 405);
+        }
+        if (!verify_csrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($_POST['csrf'] ?? null))) {
+            json_response(['error' => 'Jeton CSRF invalide.'], 403);
+        }
+        if (!$store->available()) {
+            json_response(['error' => "Base indisponible : le masquage ne peut pas être mémorisé."], 503);
+        }
+
+        $claim = open_url((string) ($_POST['token'] ?? ''), $config['secret']);
+        if ($claim === null || !str_starts_with($claim, 'media|')) {
+            json_response(['error' => 'Référence invalide ou expirée.'], 403);
+        }
+        $rel = substr($claim, 6);
+        $masquer = ((string) ($_POST['on'] ?? '1')) !== '0';
+        $store->setHidden($rel, $masquer, current_user());
+
+        json_response([
+            'ok' => true,
+            'message' => $masquer
+                ? 'Masqué de la bibliothèque — le fichier reste partagé.'
+                : 'Réaffiché dans la bibliothèque.',
+        ]);
+    }
+
+    // Suppression du fichier. Elle passe par qBittorrent, jamais par nous :
+    //  - le dossier de médias est monté en LECTURE SEULE, délibérément ;
+    //  - effacer un fichier dans le dos du client laisserait un torrent cassé,
+    //    en erreur, et un partage rompu sans que personne ne l'ait demandé.
+    // Sans torrent correspondant, on ne propose donc que le masquage.
+    if ($action === 'library-delete') {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            json_response(['error' => 'Méthode non autorisée.'], 405);
+        }
+        if (!verify_csrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($_POST['csrf'] ?? null))) {
+            json_response(['error' => 'Jeton CSRF invalide.'], 403);
+        }
+        if (!QbittorrentClient::isConfigured($config['qbit_url'])) {
+            json_response(['error' => "qBittorrent n'est pas configuré : suppression impossible."], 400);
+        }
+
+        $claim = open_url((string) ($_POST['token'] ?? ''), $config['secret']);
+        if ($claim === null || !str_starts_with($claim, 'media|')) {
+            json_response(['error' => 'Référence invalide ou expirée.'], 403);
+        }
+        $rel = substr($claim, 6);
+
+        $qc = new QbittorrentClient(
+            $config['qbit_url'],
+            $config['qbit_user'],
+            $config['qbit_pass'],
+            $config['qbit_timeout'],
+        );
+        $torrent = match_torrent($qc->torrents(), $rel);
+        if ($torrent === null) {
+            json_response([
+                'error' => "Aucun torrent ne correspond à ce fichier dans qBittorrent. "
+                    . 'Il a pu être déplacé ou retiré : utilisez « Masquer », ou supprimez-le à la main.',
+            ], 409);
+        }
+
+        try {
+            $qc->control('delete', (string) $torrent['hash'], true);
+        } catch (Throwable $e) {
+            error_log('[indexof] suppression qbit : ' . $e->getMessage());
+            json_response(['error' => 'qBittorrent a refusé la suppression.'], 502);
+        }
+        // Le masquage éventuel n'a plus d'objet une fois le fichier parti.
+        $store->setHidden($rel, false);
+
+        json_response(['ok' => true, 'message' => 'Torrent et fichier supprimés.']);
     }
 
     if ($action === 'indexers') {

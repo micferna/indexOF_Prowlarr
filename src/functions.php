@@ -75,6 +75,48 @@ function feed_base_url(): string
     return ($https ? 'https://' : 'http://') . $host . $dir;
 }
 
+/**
+ * Adresse de l'application telle qu'un téléviseur devra la joindre.
+ *
+ * Le Cast ne pousse pas la vidéo : il envoie une URL, et l'appareil va la
+ * chercher tout seul. Cette URL doit donc être valable DEPUIS LE SALON, pas
+ * depuis le serveur — c'est la première cause d'échec d'un envoi qui « part »
+ * sans rien afficher.
+ *
+ * Par défaut on la déduit de la requête : si vous consultez l'app depuis un
+ * autre appareil, l'adresse que vous utilisez est justement celle qui marche.
+ *
+ * @param array<string,mixed> $config
+ */
+function cast_base_url(array $config): string
+{
+    $configuree = (string) ($config['public_url'] ?? '');
+    return $configuree !== '' ? $configuree : feed_base_url();
+}
+
+/**
+ * Cette adresse a-t-elle une chance d'être joignable depuis un autre appareil ?
+ *
+ * « localhost » et la boucle locale désignent la machine qui pose la question :
+ * un téléviseur qui les reçoit cherchera chez lui, et ne trouvera rien.
+ */
+function cast_base_reachable(string $base): bool
+{
+    $hote = (string) parse_url($base, PHP_URL_HOST);
+    if ($hote === '') {
+        return false;
+    }
+    $hote = strtolower(trim($hote, '[]'));
+    if ($hote === 'localhost' || str_ends_with($hote, '.localhost')) {
+        return false;
+    }
+    if (filter_var($hote, FILTER_VALIDATE_IP)) {
+        return !in_array($hote, ['127.0.0.1', '::1'], true)
+            && !str_starts_with($hote, '127.');
+    }
+    return true; // un nom d'hôte réel : c'est au DNS de la maison de trancher
+}
+
 /** Échappement HTML systématique (ENT_QUOTES couvre " et '). */
 function e(?string $value): string
 {
@@ -349,6 +391,33 @@ function resolve_to_public_ip(string $host): ?string
 function resolve_host_ip(string $host): ?string
 {
     return dns_lookup_ips($host)[0] ?? null;
+}
+
+/**
+ * L'adresse appartient-elle à un vrai réseau domestique ?
+ *
+ * « Non publique » ne suffit pas : cette catégorie contient aussi la boucle
+ * locale et le lien-local — dont 169.254.169.254, le point de métadonnées des
+ * hébergeurs cloud. Un téléviseur vit dans une plage RFC 1918 (ou en IPv6
+ * unique-local) ; on n'accepte que celles-là.
+ */
+function ip_is_lan(string $ip): bool
+{
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
+        $n = ip2long($ip);
+        if ($n === false) {
+            return false;
+        }
+        return ($n & 0xFF000000) === 0x0A000000          // 10.0.0.0/8
+            || ($n & 0xFFF00000) === 0xAC100000          // 172.16.0.0/12
+            || ($n & 0xFFFF0000) === 0xC0A80000;         // 192.168.0.0/16
+    }
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
+        $paquet = @inet_pton($ip);
+        // fc00::/7 — adresses locales uniques.
+        return $paquet !== false && (ord($paquet[0]) & 0xFE) === 0xFC;
+    }
+    return false;
 }
 
 /** True si l'IP n'est ni privée ni réservée. */

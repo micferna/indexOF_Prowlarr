@@ -5,12 +5,13 @@ declare(strict_types=1);
 require_once __DIR__ . '/functions.php';
 
 /**
- * Récupération d'un fichier .torrent depuis une source externe.
+ * Récupération d'un fichier distant (.torrent, affiche) depuis une source
+ * externe.
  *
  * C'est la surface la plus sensible du projet : on va chercher une URL pour le
  * compte de l'utilisateur. Toutes les défenses vivent ici, en un seul endroit —
- * le proxy de téléchargement et l'aperçu du contenu s'en servent tous les deux,
- * et ne peuvent donc pas diverger.
+ * le proxy de téléchargement, l'aperçu du contenu et le proxy d'affiches s'en
+ * servent tous les trois, et ne peuvent donc pas diverger.
  *
  * Défenses :
  *  1. Schémas http/https uniquement (CURLOPT_PROTOCOLS).
@@ -28,6 +29,7 @@ final class TorrentFetchError extends RuntimeException
 }
 
 const TORRENT_MAX_BYTES     = 25 * 1024 * 1024; // 25 Mo
+const POSTER_MAX_BYTES      = 3 * 1024 * 1024;  // 3 Mo : une affiche en fait ~50 Ko
 const TORRENT_MAX_REDIRECTS = 3;
 
 /**
@@ -37,6 +39,18 @@ const TORRENT_MAX_REDIRECTS = 3;
  * @throws TorrentFetchError avec un code HTTP utilisable tel quel.
  */
 function fetch_torrent(string $url, array $config): string
+{
+    return fetch_remote($url, $config, TORRENT_MAX_BYTES)['body'];
+}
+
+/**
+ * Télécharge une ressource distante en appliquant toutes les défenses ci-dessus.
+ *
+ * @param array<string,mixed> $config
+ * @return array{body:string,type:string}
+ * @throws TorrentFetchError avec un code HTTP utilisable tel quel.
+ */
+function fetch_remote(string $url, array $config, int $maxBytes): array
 {
     // Le backend Prowlarr (admin-configuré) est de confiance : ses liens de
     // téléchargement pointent souvent vers lui-même, sur une IP privée (réseau
@@ -84,9 +98,9 @@ function fetch_torrent(string $url, array $config): string
             CURLOPT_RESOLVE        => ["{$host}:{$port}:{$ip}"], // épingle l'IP validée
             CURLOPT_USERAGENT      => 'indexOF-Prowlarr/2.0',
             // Accumule le corps, coupe si dépassement du plafond.
-            CURLOPT_WRITEFUNCTION  => function ($ch, string $chunk) use (&$downloaded, &$buffer): int {
+            CURLOPT_WRITEFUNCTION  => function ($ch, string $chunk) use (&$downloaded, &$buffer, $maxBytes): int {
                 $downloaded += strlen($chunk);
-                if ($downloaded > TORRENT_MAX_BYTES) {
+                if ($downloaded > $maxBytes) {
                     return -1; // abandon de cURL
                 }
                 $buffer .= $chunk;
@@ -98,9 +112,10 @@ function fetch_torrent(string $url, array $config): string
         $errno    = curl_errno($ch);
         $status   = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         $redirect = (string) curl_getinfo($ch, CURLINFO_REDIRECT_URL);
+        $type     = strtolower(trim(explode(';', (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE))[0]));
         curl_close($ch);
 
-        if ($downloaded > TORRENT_MAX_BYTES) {
+        if ($downloaded > $maxBytes) {
             throw new TorrentFetchError('Fichier trop volumineux.', 413);
         }
         if ($ok === false || $errno !== 0) {
@@ -122,6 +137,6 @@ function fetch_torrent(string $url, array $config): string
             throw new TorrentFetchError('Réponse vide de la source.', 502);
         }
 
-        return $buffer;
+        return ['body' => $buffer, 'type' => $type];
     }
 }

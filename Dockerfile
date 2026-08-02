@@ -8,6 +8,22 @@ FROM php:8.5-fpm-alpine AS php
 # Applique les correctifs de sécurité des paquets OS (CVE).
 RUN apk upgrade --no-cache
 
+# `sockets` : requis par la découverte des récepteurs Cast, qui écoute le
+# multicast mDNS — ce que les flux de PHP ne savent pas faire. L'extension n'est
+# utilisée que par le service de découverte, jamais par les pages web.
+#
+# linux-headers n'est nécessaire qu'à la compilation (sock_diag.h) : on l'ajoute
+# en paquet virtuel et on le retire, pour ne pas alourdir l'image finale.
+RUN set -eux; \
+    apk add --no-cache --virtual .build-sockets linux-headers; \
+    docker-php-ext-install -j"$(nproc)" sockets; \
+    apk del --no-network .build-sockets
+
+# ffmpeg : lecture adaptative. Un MKV en H.264/AAC est simplement recopié dans
+# du MP4 (quasiment gratuit), seul ce qui doit l'être est réellement réencodé.
+# Sans lui l'application fonctionne, mais ne sait plus que lire en direct.
+RUN apk add --no-cache ffmpeg
+
 # Configuration PHP de production + durcissement.
 RUN set -eux; \
     mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"; \

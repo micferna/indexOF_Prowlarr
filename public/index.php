@@ -47,6 +47,12 @@ $showLogout = auth_enabled($config);
             <span class="btn-top-fire" aria-hidden="true">🔥</span><span class="btn-top-label">Top</span>
         </button>
 
+        <button type="button" id="library-btn" class="btn-top" hidden aria-label="Bibliothèque"
+                title="Ce qui est téléchargé, prêt à regarder">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v14H4zM4 18l4-4 3 3 3-3 6 6M8 9a1 1 0 1 0 0-.01"/></svg>
+            <span class="btn-top-label">Bibliothèque</span>
+        </button>
+
         <button type="button" id="transfers-btn" class="btn-top" hidden aria-label="Transferts en cours"
                 title="Ce que qBittorrent est en train de télécharger ou de partager">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
@@ -98,6 +104,11 @@ $showLogout = auth_enabled($config);
                             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17l9 5 9-5"/></svg>
                             <span>Grouper les doublons</span>
                         </button>
+                        <button type="button" id="poster-toggle" class="mask-btn" hidden aria-pressed="true"
+                                title="Affiche et résumé du film ou de la série, sans ouvrir la page du tracker">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18v16H3zM3 16l5-5 4 4 3-3 6 6M8 9a1 1 0 1 0 0-.01"/></svg>
+                            <span>Affiches</span>
+                        </button>
                     </div>
                     <button type="button" id="filters-reset" class="link-btn">Réinitialiser</button>
                 </div>
@@ -125,6 +136,9 @@ $showLogout = auth_enabled($config);
     </header>
 
     <main id="results" class="results" aria-live="polite"></main>
+
+    <!-- Fiche du média : une seule, déplacée sous la vignette survolée. -->
+    <div id="meta-card" class="meta-card" hidden role="dialog" aria-label="Fiche du média"></div>
 
     <noscript><p class="noscript">JavaScript est requis pour cette application.</p></noscript>
 
