@@ -33,6 +33,15 @@ services:
       # Historique d'envois et recherches enregistrées : une base SQLite, donc
       # un volume. Sans lui, ces fonctionnalités se désactivent d'elles-mêmes.
       - php-data:/var/lib/indexof
+      # Bibliothèque : ce que qBittorrent a terminé. EN LECTURE SEULE — l'app
+      # liste et donne à lire, elle n'a aucune raison de pouvoir effacer un
+      # film. Sans ce montage, la vue Bibliothèque se désactive d'elle-même.
+      - ${DOWNLOADS_DIR:-./data/downloads}:/media:ro
+      # Espace de travail des conversions HLS. Le SEUL endroit inscriptible en
+      # dehors du cache : les segments d'un film ne tiennent pas en RAM, et le
+      # dossier de médias reste en lecture seule. À placer sur un disque avec de
+      # l'espace — comptez la taille du film par lecture en cours.
+      - ${TRANSCODE_DIR:-./data/transcode}:/transcode
 
   web:
     build:
@@ -41,10 +50,13 @@ services:
     image: indexof-prowlarr-web:latest
     container_name: indexof_web
     restart: unless-stopped
-    # N'écoute QUE sur la loopback : un reverse-proxy TLS (sur cet hôte) expose le
-    # service en HTTPS. Si votre reverse-proxy est sur une autre machine, adaptez.
+    # Par défaut la loopback seule : exposez via un reverse-proxy TLS.
+    #
+    # Le Cast fait exception : le téléviseur vient chercher la vidéo lui-même, et
+    # « localhost » ne désigne rien pour lui. Dans ce cas seulement, posez
+    # BIND_ADDR sur l'adresse de la machine dans le réseau local — jamais 0.0.0.0.
     ports:
-      - "127.0.0.1:8080:80"
+      - "${BIND_ADDR:-127.0.0.1}:8080:80"
     depends_on:
       - php
     networks:
@@ -59,10 +71,53 @@ services:
       - SETGID
       - CHOWN
     read_only: true
+    volumes:
+      # Les vidéos sont servies par nginx, pas par PHP : un film de 20 Go passant
+      # par php-fpm mobiliserait un worker pendant toute la lecture, et les
+      # requêtes Range du navigateur seraient à réimplémenter. PHP se contente
+      # d'autoriser, nginx envoie (X-Accel-Redirect). Lecture seule, et le
+      # dossier n'est atteignable que par une redirection interne.
+      - ${DOWNLOADS_DIR:-./data/downloads}:/media:ro
+      # Segments HLS : c'est nginx qui les sert, PHP ne fait que les produire.
+      - ${TRANSCODE_DIR:-./data/transcode}:/transcode:ro
     tmpfs:
       - /var/cache/nginx
       - /var/run
       - /tmp
+
+  # Découverte des récepteurs Cast (MiBox, Chromecast, Android TV).
+  #
+  # SEUL service en réseau hôte, et c'est la raison d'être de sa séparation : le
+  # multicast mDNS ne traverse pas le bridge Docker, donc le conteneur applicatif
+  # n'entendrait aucune annonce. Ce service écoute, écrit une liste dans le
+  # volume partagé, et c'est tout : aucun port ouvert, aucune API, l'application
+  # ne lui parle jamais.
+  #
+  # Derrière un profil : rien ne démarre sans le demander explicitement.
+  #   docker compose --profile cast up -d
+  cast:
+    build:
+      context: .
+      target: php
+    image: indexof-prowlarr-php:latest
+    container_name: indexof_cast
+    profiles: ["cast"]
+    restart: unless-stopped
+    command: ["php", "/var/www/html/bin/cast-discover.php"]
+    environment:
+      DATA_DIR: /var/lib/indexof
+      CAST_SCAN_INTERVAL: "60"
+    # Indispensable : c'est ce qui donne accès au multicast du réseau local.
+    network_mode: host
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - php-data:/var/lib/indexof
 
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
@@ -99,7 +154,7 @@ services:
       # restent dans la couche du conteneur et disparaissent à sa recréation.
       # Le chemin doit être identique côté Sonarr/Radarr pour qu'ils retrouvent
       # les téléchargements terminés.
-      - ./data/downloads:/downloads
+      - ${DOWNLOADS_DIR:-./data/downloads}:/downloads
     # WebUI : loopback uniquement, authentification obligatoire (mot de passe
     # PBKDF2 posé dans data/qbittorrent/.../qBittorrent.conf, bypass sous-réseau
     # et localhost désactivés, CSRF + validation d'en-tête Host actives).
@@ -164,7 +219,7 @@ services:
       TZ: Europe/Paris
     volumes:
       - ./data/sonarr:/config
-      - ./data/downloads:/downloads
+      - ${DOWNLOADS_DIR:-./data/downloads}:/downloads
     ports:
       - "127.0.0.1:8989:8989"
     networks:
@@ -183,7 +238,7 @@ services:
       TZ: Europe/Paris
     volumes:
       - ./data/radarr:/config
-      - ./data/downloads:/downloads
+      - ${DOWNLOADS_DIR:-./data/downloads}:/downloads
     ports:
       - "127.0.0.1:7878:7878"
     networks:

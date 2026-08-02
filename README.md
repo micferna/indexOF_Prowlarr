@@ -65,6 +65,21 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
   remonte en jetons retirables au-dessus de la liste.
 - **Contenu du `.torrent`** avant de le prendre : un fichier ou un pack de quarante
   épisodes ? La liste se déplie sous la ligne, sans rien télécharger dans qBittorrent.
+- **Affiche et résumé** de chaque film ou série, directement dans la liste. Une vignette
+  à gauche du titre, la fiche complète au survol (au doigt : une tape) — année, note,
+  durée, genres, synopsis. C'est ce qui évite d'ouvrir la page du tracker, donc de s'y
+  connecter, juste pour savoir de quel film il s'agit.
+  Détails : [Affiches et fiches](#affiches-et-fiches).
+- **Bibliothèque** : ce qui est téléchargé, en grille d'affiches. Lecture dans le
+  navigateur, lien à ouvrir dans VLC, ou envoi sur le téléviseur. Ce que l'appareil
+  ne sait pas décoder est **converti à la volée** — et seulement ce qui doit l'être :
+  un MKV en H.264/AAC est simplement remis dans un autre conteneur, quasiment gratuit.
+  Retirer un fichier distingue **masquer** (il reste partagé) de **supprimer**.
+  Détails : [Bibliothèque et lecture](#bibliothèque-et-lecture).
+- **Envoi sur le téléviseur** (Cast) : les récepteurs du réseau sont découverts tout
+  seuls — MiBox, Chromecast, Android TV. Lecture, déplacement dans le film et durée
+  complète fonctionnent, y compris sur un fichier converti.
+  Détails : [Envoyer sur le téléviseur](#envoyer-sur-le-téléviseur-cast).
 - **Santé des indexeurs** : cliquez sur l'indicateur d'état pour voir la latence, le
   volume et les échecs de chacun. C'est ce qui explique une recherche qui traîne.
 - **Filtre par taille** (tranches cliquables) et **exclusion de mots** dans la
@@ -121,6 +136,16 @@ lisible passe en clair, les tokens techniques sont mis en valeur là où ils son
 | `TRUST_PROXY` | `1` seulement derrière un reverse-proxy qui pose `X-Forwarded-For` | `0` |
 | `DISCORD_WEBHOOK` | Webhook d'un salon Discord. Vide = cloche masquée | _(vide)_ |
 | `NOTIFY_INTERVAL` | Secondes entre deux vérifications du service de veille | `900` |
+| `BIND_ADDR` | Adresse d'écoute. Loopback par défaut ; à changer **uniquement** pour le Cast, qui exige que le téléviseur puisse joindre l'app | `127.0.0.1` |
+| `DOWNLOADS_DIR` | Dossier des téléchargements **sur l'hôte**. Pointez-le vers un disque avec de l'espace ; le chemin dans les conteneurs ne change pas | `./data/downloads` |
+| `MEDIA_DIR` | Chemin du même dossier **vu par l'application**. Ne changez pas sans raison | `/media` |
+| `PUBLIC_BASE_URL` | Adresse de l'app **vue depuis le réseau local**. C'est elle qu'on donne au téléviseur pour le Cast. Vide = déduite de la requête | _(vide)_ |
+| `CAST_SCAN_INTERVAL` | Secondes entre deux recherches de récepteurs Cast | `60` |
+| `TRANSCODE` | `0` pour désactiver la conversion à la volée (lecture directe seule) | `1` |
+| `TRANSCODE_MAX` | Conversions simultanées en flux continu (navigateur). Chacune occupe un worker et un cœur | `2` |
+| `TRANSCODE_DIR` | Dossier des segments HLS **sur l'hôte**. Doit appartenir à l'utilisateur du conteneur PHP (`chown 82:82`) | `./data/transcode` |
+| `FFMPEG_BIN` / `FFPROBE_BIN` | Chemins des binaires, s'ils ne sont pas dans le `PATH` | `ffmpeg` / `ffprobe` |
+| `STREAM_TTL` | Validité d'un lien de lecture (s). Il vaut autorisation à lui seul : VLC n'a pas de session | `43200` (12 h) |
 | `DATA_DIR` | Répertoire de la base SQLite (historique, recherches enregistrées) | `/var/lib/indexof` |
 | `CACHE_TTL` | Durée du cache recherches/indexeurs (s) | `120` |
 | `CACHE_DIR` | Répertoire de cache | `/tmp/indexof_cache` |
@@ -187,6 +212,245 @@ docker compose --profile arr up -d
 - Dans Prowlarr, ajoutez-les en **Apps** : il y synchronisera vos indexeurs.
 - Les trois services partagent `./data/downloads` : c'est ce qui permet aux *arr
   de retrouver les fichiers que qBittorrent a terminés.
+
+## Affiches et fiches
+
+Un nom de release ne dit pas de quel film il s'agit. Jusqu'ici, pour le savoir, il
+fallait ouvrir la fiche du tracker — donc s'y connecter, tracker par tracker. La
+vignette et le résumé rendent ce détour inutile.
+
+**Aucune configuration.** La fonctionnalité s'allume dès que Radarr ou Sonarr est
+renseigné dans `.env` — les mêmes réglages que pour l'envoi. Ce sont eux qui
+interrogent TMDB / TheTVDB via le serveur de métadonnées des \*arr : pas de clé API
+supplémentaire à obtenir. Sans eux, le bouton n'apparaît pas et rien ne change.
+
+Pourquoi eux et pas Prowlarr : Prowlarr ne renvoie pas d'affiche du tout, et moins
+d'un quart de ses résultats portent un identifiant IMDb ou TMDB.
+
+Ce qui est cherché, et comment :
+
+- Le titre est découpé pour en extraire l'œuvre — `The.Matrix.1999.MULTi.2160p…`
+  devient « The Matrix », 1999 ; `Breaking.Bad.S01E01…` devient « Breaking Bad »,
+  saison 1. Quand l'indexeur donne un identifiant IMDb ou TMDB, il prime : c'est
+  exact plutôt que probable.
+- **Les accents cassés sont réparés d'abord.** Beaucoup de trackers publient
+  leurs titres en UTF-8 déjà relu comme du Latin-1 : « Deuxième » y arrive en
+  « DeuxiÃ¨me ». Tant qu'on cherchait avec ces octets-là, aucune base ne
+  reconnaissait le titre — c'était la première cause d'affiche manquante.
+- Seuls les films et les séries sont concernés. On n'interroge pas Radarr pour un
+  album ou une image ISO.
+- Les releases qui désignent la même œuvre ne comptent qu'une fois : quarante
+  versions de Matrix, c'est une recherche, pas quarante. Le reste est mis en cache
+  sur le volume persistant, pendant 30 jours.
+
+**Le premier résultat n'est pas le bon.** Pour « GAME OF THRONES INTEGRAL »,
+Sonarr propose « Game of Thrones Talk », puis « The Iron Anniversary », et le
+vrai « Game of Thrones » en quatrième position seulement. Les candidats sont donc
+classés — correspondance de titre, d'année, ou des deux — au lieu de faire
+confiance à l'ordre. Les titres alternatifs comptent : c'est par eux que « Dune :
+Deuxième partie » rejoint « Dune: Part Two ». Un candidat plus long que ce qu'on
+cherche est en revanche une autre œuvre : « Le Roi Lion » ne doit pas attraper
+« Le Roi Lion - Les nouvelles Aventures ».
+
+Quand rien ne correspond, quatre replis sont essayés dans l'ordre — et seulement
+pour ce qui n'a pas abouti, ce qui laisse le cas courant à un seul aller-retour :
+
+1. **Le titre entre parenthèses en fin de nom.** `… x265-QTZ (Dune Part Two)`,
+   `… -RONIN (D@bbe: The Possession)` : les uploadeurs y mettent le titre
+   international d'une release publiée sous son titre local.
+2. **Le titre débarrassé des mots qui décrivent le lot** : « Avatar Trilogie »
+   devient « Avatar », « Game of Thrones The Complete Series » devient
+   « Game of Thrones ».
+3. **Le nom amputé de son dernier mot**, puis réduit à ses deux premiers — pour
+   « Les Visiteurs Elia Kazan » et consorts. Jamais jusqu'à un tronçon sans mot
+   porteur : « Le Roi » ramenait vingt films sans rapport.
+
+Au-delà du premier essai, une fiche n'est retenue que si son année correspond à
+celle de la release, et une année connue mais démentie par tous les candidats
+vaut refus — c'est un désaccord, pas une hésitation. Une affiche fausse est pire
+qu'une case vide.
+
+Mesuré sur vingt recherches réelles (1 200 films et séries) : **1 181 fiches
+trouvées, soit 98 %**. Les manquantes sont pour l'essentiel des coffrets
+(« Trilogie », « Pentalogie », « Saga INTEGRALE ») — où aucune fiche unique ne
+serait juste — et quelques documentaires absents des bases.
+
+**Le navigateur ne contacte jamais TMDB ni TheTVDB.** Les images passent par
+`poster.php`, qui va les chercher côté serveur et les garde. Un `<img>` pointant
+directement sur un CDN annoncerait à un tiers l'adresse IP de qui regarde, et quoi —
+sur cette application-là, c'est précisément ce qu'on ne veut pas. La CSP reste donc
+`img-src 'self'`, et une affiche déjà vue n'est retéléchargée par personne.
+
+Le proxy n'accepte que des sources d'images connues (`image.tmdb.org`,
+`artworks.thetvdb.com`, `assets.fanart.tv`), même face à un jeton scellé par
+l'application : un jeton valide n'est pas un blanc-seing. Le contenu récupéré est
+vérifié sur ses octets de tête — si ce n'est pas une image, il n'est ni servi ni
+mis en cache.
+
+Le bouton **Affiches** du panneau Filtres coupe l'affichage si vous préférez la
+liste dense ; le choix est mémorisé.
+
+## Bibliothèque et lecture
+
+> **Où sont rangés les fichiers.** Par défaut dans `./data/downloads`, c'est-à-dire
+> sur la partition du projet — souvent la plus petite. `DOWNLOADS_DIR` déplace ce
+> dossier où vous voulez sans rien changer d'autre : le chemin **à l'intérieur**
+> des conteneurs reste `/downloads`, donc les torrents en cours, Sonarr et Radarr
+> continuent de s'y retrouver. Le dossier doit appartenir à `PUID:PGID`
+> (1000:1000 par défaut) et être lisible par tous — `chmod 755` : l'application
+> le lit en tant que `www-data` pour la bibliothèque.
+
+Une vue **Bibliothèque** liste ce que le client de téléchargement a effectivement
+posé sur le disque, avec les mêmes affiches et résumés que les résultats de
+recherche. Le bouton apparaît dès que `./data/downloads` est monté (c'est le cas
+par défaut) ; sinon la vue se désactive d'elle-même.
+
+Deux façons de regarder, parce qu'aucune ne suffit seule :
+
+- **Dans le navigateur**, pour ce qu'il sait décoder — MP4, M4V, WebM. Un bouton
+  ▶ déplie un lecteur sous la fiche. Le déplacement dans la vidéo fonctionne
+  (requêtes Range), y compris sur un fichier de plusieurs gigaoctets.
+- **Dans VLC**, pour tout le reste. Un MKV en HEVC avec piste DTS ne passera
+  jamais dans un onglet ; l'interface le dit *avant* le clic (« VLC requis »)
+  plutôt que d'afficher une vidéo noire. Le bouton « copier » donne un lien à
+  ouvrir dans VLC — *Média › Ouvrir un flux réseau* — sur un ordinateur, un
+  téléphone ou une box Android TV.
+
+### Retirer un fichier
+
+Deux gestes, volontairement distincts — c'est la différence qui compte sur un
+tracker privé :
+
+- **Masquer** : le fichier disparaît de la liste, **rien d'autre**. Il reste sur
+  le disque et continue d'être partagé. Désencombrer sa vue ne doit pas coûter
+  son ratio. Réversible : « Afficher les N masqués » les ramène.
+- **+ fichier** : qBittorrent retire le torrent **et** le fichier. Le partage
+  s'arrête, forcément.
+
+La confirmation se fait en deux temps, sans boîte de dialogue.
+
+La suppression passe toujours par qBittorrent, jamais par l'application : le
+dossier de médias est monté en lecture seule (délibérément), et effacer un
+fichier dans le dos du client laisserait un torrent en erreur et un partage rompu
+que personne n'a demandé. Sans torrent correspondant — fichier déplacé, torrent
+déjà retiré — seul le masquage est proposé, et le motif est affiché. Deux
+torrents portant le même nom font également refuser : un choix arbitraire efface
+le mauvais fichier, et c'est irréversible.
+
+### Envoyer sur le téléviseur (Cast)
+
+Un bouton d'envoi apparaît sur chaque fichier dès qu'un récepteur Cast a été vu
+sur le réseau — MiBox, Chromecast, Android TV. Il faut démarrer le service de
+découverte, qui n'est pas lancé par défaut :
+
+```bash
+docker compose --profile cast up -d
+```
+
+**Pourquoi un service à part ?** Les appareils Cast s'annoncent par multicast
+mDNS, et le multicast ne traverse pas le réseau bridge de Docker : depuis le
+conteneur applicatif, on n'entend rien. Ce service est donc le seul en
+`network_mode: host`. Il écoute, dépose la liste dans un fichier du volume
+partagé, et c'est tout : aucun port ouvert, aucune API, l'application ne lui
+parle jamais.
+
+**`PUBLIC_BASE_URL` : le réglage qui décide de tout.** Le Cast ne pousse pas la
+vidéo — il envoie une URL, et c'est le téléviseur qui va la chercher. Cette URL
+doit donc être valable *depuis le salon*. Par défaut elle est déduite de la
+requête, ce qui est juste dès que vous consultez l'app depuis un autre appareil.
+Si l'adresse déduite est une boucle locale, l'envoi est **refusé avec le motif**
+plutôt que de partir dans le vide et de laisser un écran noir :
+
+```bash
+PUBLIC_BASE_URL=http://192.168.1.50:8080
+```
+
+**Les formats ne sont plus un obstacle** : le récepteur Cast ne lit que du
+H.264/AAC en MP4, mais l'application convertit ce qui doit l'être avant de lui
+donner l'URL. Un MKV en HEVC avec piste DTS passe donc, **et reste navigable** —
+la durée complète est connue du téléviseur.
+
+Ce qui a demandé trois corrections, toutes mesurées sur un vrai appareil :
+
+1. **Un flux converti au fil de l'eau ne suffit pas.** Sans taille annoncée ni
+   requêtes Range, la Mi Box en lit une quinzaine de secondes, referme la
+   connexion et reste bloquée (18 Mo puis plus rien, journal nginx à l'appui).
+   Le Cast passe donc par **HLS** : segments + liste de lecture.
+2. **Le téléviseur ne suit pas les redirections** sur un média : il redemande
+   trois fois puis abandonne. C'est l'adresse finale de la liste qui lui est
+   transmise, pas un renvoi.
+3. **CORS est indispensable.** Un récepteur Cast lit un MP4 progressif via
+   `<video src>` — aucun contrôle d'origine — mais le HLS via XHR/MSE. Sans
+   `Access-Control-Allow-Origin`, la requête échoue en silence et l'appareil
+   redemande la liste en boucle sans jamais charger un segment.
+
+Les segments sont écrits dans `TRANSCODE_DIR` : **comptez la taille du film par
+lecture**, effacée au bout de six heures. Placez ce dossier sur un disque avec de
+l'espace, et donnez-le à l'utilisateur du conteneur PHP (`chown 82:82`).
+
+Avec `TRANSCODE=0`, on retombe sur la lecture directe seule et l'interface
+prévient avant le clic.
+
+L'adresse du téléviseur vient du navigateur : elle est donc restreinte aux plages
+RFC 1918 (`10/8`, `172.16/12`, `192.168/16`) et IPv6 unique-local. « Pas
+publique » ne suffirait pas — cette catégorie contient `169.254.169.254`, le
+point de métadonnées des hébergeurs cloud, et cet endpoint deviendrait un
+scanner de ports à la demande.
+
+### Conversion à la volée
+
+« Si l'appareil sait lire, il lit ; sinon on convertit. » La décision se prend sur
+les **codecs réels** (via `ffprobe`), jamais sur l'extension — et surtout, **on ne
+convertit que ce qu'il faut** :
+
+| Mode | Quand | Coût |
+|------|-------|------|
+| `direct` | Conteneur et codecs déjà compatibles | Aucun processus, nginx sert le fichier, **déplacement possible** |
+| `remux` | Codecs bons, conteneur non (MKV en H.264/AAC) | Les flux sont recopiés tels quels — quasiment gratuit |
+| `audio` | Image bonne, son non (AC3, DTS, TrueHD) | Seul l'audio est réencodé |
+| `full` | L'image aussi (HEVC, VC-1, XviD) | Le seul cas réellement lourd |
+
+Sur une bibliothèque typique, la majorité des MKV tombe en `remux` ou `audio` : le
+transcodage complet reste l'exception. Le nom du codec ne suffit pas — un H.264 en
+10 bits (« Hi10P ») ou en 4:2:2 n'est décodé ni par un navigateur ni par un
+récepteur Cast, alors que `ffprobe` l'annonce comme du simple « h264 ». Le format
+de pixels est donc vérifié aussi.
+
+**Ce que ça ne fait pas : le déplacement dans une vidéo convertie.** Le flux est
+produit au fil de l'eau, sa taille n'est pas connue d'avance ; il n'y a donc ni
+`Content-Length` ni requêtes Range. La lecture directe, elle, reste navigable.
+Résoudre ça demanderait de la segmentation HLS — c'est là que commence le
+véritable serveur de médias.
+
+Chaque conversion occupe un worker php-fpm et un cœur pendant toute la lecture :
+`TRANSCODE_MAX` (2 par défaut) plafonne les lectures simultanées, au-delà l'app
+répond « trop de conversions en cours » plutôt que de figer la machine. Mettez
+`TRANSCODE=0` pour tout désactiver : ce qui passe passe, le reste ne passe pas,
+mais aucun processeur n'est mobilisé.
+
+Pour une bibliothèque complète avec segmentation, sous-titres incrustés et reprise
+de lecture, Jellyfin sur le même dossier `./data/downloads` reste plus complet —
+les deux cohabitent sans se gêner.
+
+### Comment c'est servi
+
+**PHP autorise, nginx envoie.** Un film relayé par php-fpm mobiliserait un worker
+pendant toute la lecture et obligerait à réimplémenter les requêtes Range.
+`stream.php` valide le jeton puis renvoie un `X-Accel-Redirect` vers un
+emplacement `internal` — inatteignable depuis l'extérieur. nginx s'occupe du
+reste : Range, reprise, ETag, nativement.
+
+**Le lien de lecture vaut autorisation, sans session.** Il le faut : VLC sur une
+télévision n'a pas le cookie du navigateur. Le jeton est donc chiffré
+(AES-256-GCM), expire au bout de 12 h (`STREAM_TTL`) et ne désigne qu'un chemin
+relatif. Traitez-le comme un lien de partage : qui l'a peut lire ce fichier
+jusqu'à expiration.
+
+**Le dossier est monté en lecture seule**, dans les deux conteneurs. L'application
+liste et donne à lire ; elle n'a aucune raison de pouvoir effacer un film.
+`resolve()` repasse par `realpath()` et exige que la cible reste sous la racine :
+ni `../`, ni chemin absolu, ni lien symbolique ne sortent de la bibliothèque —
+c'est testé.
 
 ## Comptes utilisateurs
 
@@ -260,7 +524,10 @@ l'administrateur.
 - **Authentification obligatoire** : `APP_PASSWORD` (session + CSRF). Sans lui, l'app refuse de démarrer, à moins de poser explicitement `AUTH_DISABLED=1`. Comptes nommés en option, mots de passe hachés, gestion réservée à l'administrateur.
 - **Liens de téléchargement scellés** : les URLs Prowlarr (qui contiennent la clé API) ne sont jamais envoyées au navigateur. Le client reçoit un jeton chiffré (AES-256-GCM) à durée de vie limitée, que seul le serveur peut ouvrir.
 - **Proxy `.torrent` anti-SSRF** : schémas `http(s)` uniquement, rejet des IP privées/réservées, épinglage de l'IP validée (anti-DNS-rebinding), re-validation à chaque redirection, plafond de taille et timeouts.
-- **Anti-brute-force** : `limit_req` nginx sur les POST de login + verrouillage applicatif (10 échecs / 15 min par IP).
+- **Envoi Cast borné** : l'adresse du téléviseur vient du navigateur, elle est donc restreinte aux plages RFC 1918 et IPv6 unique-local. « Non publique » laisserait passer `169.254.169.254` (métadonnées cloud) et ferait de l'endpoint un scanner de ports. POST + CSRF, et la cible de lecture vient toujours d'un jeton scellé.
+- **Lecture cloisonnée** : le dossier de médias est monté en lecture seule, les chemins repassent par `realpath()` et doivent rester sous la racine (ni `../`, ni chemin absolu, ni lien symbolique sortant). nginx sert les fichiers depuis un emplacement `internal`, inatteignable directement. Le jeton de lecture est chiffré et expire.
+- **Proxy d'affiches cloisonné** : liste d'hôtes d'images autorisés vérifiée à l'ouverture du jeton, type réel contrôlé sur les octets de tête, réponse servie inerte (`default-src 'none'; sandbox`). Aucune requête du navigateur vers un service tiers : ni l'adresse IP du visiteur ni ce qu'il regarde ne sortent.
+- **Anti-brute-force** : `limit_req` nginx sur les POST de login + verrouillage applicatif (10 échecs / 15 min par IP). Les affiches ont leur propre quota : vingt-cinq images en une page ne consomment pas celui de l'API.
 - **En-têtes** : CSP stricte (pas d'inline, pas de CDN), `nosniff`, `no-referrer`, `frame-ancestors 'none'`.
 - **Conteneurs durcis** : non-root, `cap_drop: ALL`, `no-new-privileges`, système de fichiers en lecture seule, ports liés à la loopback.
 - **Dégradation propre** : si la base n'est pas accessible en écriture, les recherches enregistrées et l'historique disparaissent de l'interface — la recherche, elle, continue de fonctionner.
@@ -276,6 +543,8 @@ public/                 # Racine web exposée (seul ce dossier est servi)
   api.php               # API JSON : status + indexeurs + recherche (jetons scellés)
   send.php              # Envoi d'un torrent vers qBittorrent (auth + CSRF + jeton)
   download_torrent.php  # Proxy .torrent sécurisé (jeton chiffré + anti-SSRF)
+  poster.php            # Proxy d'affiches (hôtes autorisés + cache disque)
+  stream.php            # Lecture vidéo : valide le jeton, nginx sert (X-Accel)
   assets/               # CSS et JS, servis sans dépendance externe
 src/                    # Hors racine web
   config.php            # Chargement de la configuration (env > .env)
@@ -284,11 +553,18 @@ src/                    # Hors racine web
   QbittorrentClient.php # Client Web API qBittorrent (ajout par URL/magnet)
   functions.php         # Échappement, URL, jetons scellés, XML, formatage
   Search.php            # Recherche partagée par l'API et les flux RSS
-  TorrentFetcher.php    # Récupération .torrent anti-SSRF (proxy + aperçu)
+  TorrentFetcher.php    # Récupération distante anti-SSRF (.torrent + affiches)
+  Metadata.php          # Découpage des titres + fiches via Radarr/Sonarr
+  Library.php           # Scan du dossier de téléchargements (chemins cloisonnés)
+  Transcoder.php        # Décision direct/remux/audio/full + commandes ffmpeg
+  CastProtocol.php      # Trames du protocole Google Cast (protobuf à la main)
+  CastClient.php        # Envoi d'une vidéo vers un récepteur (TLS + CASTV2)
+  CastDiscovery.php     # Lecture des annonces mDNS des récepteurs
   Bencode.php           # Lecture du contenu d'un .torrent
   ArrClient.php         # Client Sonarr/Radarr/Lidarr/Readarr (release/push)
   Store.php             # Base SQLite : envois mémorisés, recherches enregistrées
 bin/notify.php          # Veille : signale les nouveautés sur Discord
+bin/cast-discover.php   # Découverte des récepteurs Cast (réseau hôte)
 tests/                  # Tests PHPUnit (fonctions critiques)
 docker/nginx.conf       # Vhost nginx (reverse-proxy FastCGI vers php-fpm)
 Dockerfile              # Multi-stage : php-fpm (app) + nginx (web), base Alpine

@@ -79,6 +79,22 @@ function map_result(array $r, string $secret): array
         }
     }
 
+    // Nature de la release, d'après les catégories newznab : c'est ce qui décide
+    // si une fiche (affiche, résumé) a un sens. Un album ou une distribution
+    // Linux n'a rien à aller chercher chez Radarr.
+    $kind = null;
+    foreach ((array) ($r['categories'] ?? []) as $c) {
+        $id = is_array($c) ? (int) ($c['id'] ?? 0) : 0;
+        if ($id >= 2000 && $id < 3000) {
+            $kind = 'movie';
+            break;
+        }
+        if ($id >= 5000 && $id < 6000) {
+            $kind = 'tv';
+            break;
+        }
+    }
+
     // Freeleech via les flags d'indexeur.
     $freeleech = false;
     if (!empty($r['indexerFlags']) && is_array($r['indexerFlags'])) {
@@ -103,6 +119,12 @@ function map_result(array $r, string $secret): array
         'publishDate' => (string) ($r['publishDate'] ?? ''),
         'daysOld'     => days_since($r['publishDate'] ?? null),
         'category'    => $category,
+        'kind'        => $kind,
+        // Identifiants d'œuvre quand l'indexeur les donne (un résultat sur
+        // quatre) : ils valent mieux que n'importe quel découpage de titre pour
+        // retrouver la bonne fiche.
+        'imdbId'      => (string) ($r['imdbId'] ?? '') ?: null,
+        'tmdbId'      => (int) ($r['tmdbId'] ?? 0) ?: null,
         'adult'       => is_adult_result($r),
         'badges'      => quality_badges($title),
         'freeleech'   => $freeleech,

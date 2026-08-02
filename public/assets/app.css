@@ -633,6 +633,249 @@ a.rel:hover { color: var(--amber); }
     font-weight: 650;
 }
 
+/* ---------- Affiches et fiches ----------
+   Reconnaître un film sans ouvrir la page du tracker. La vignette est petite et
+   sobre : elle sert à repérer, pas à décorer — c'est le titre qui reste le sujet
+   de la ligne. La fiche complète n'apparaît qu'au survol, à la demande. */
+.cell-title-row {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    min-width: 0;
+}
+.cell-title-body { min-width: 0; flex: 1; }
+
+.poster {
+    flex: none;
+    width: 34px;
+    height: 51px;
+    border-radius: var(--r-sm);
+    overflow: hidden;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: zoom-in;
+    transition: border-color 0.15s, transform 0.15s;
+}
+.poster:hover,
+.poster:focus-visible { border-color: var(--amber-line); transform: scale(1.06); }
+.poster:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+.poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Ni affiche ni fiche : un rectangle vide vaut mieux qu'une icône cassée, et
+   garde l'alignement de la colonne. */
+.poster-blank { cursor: default; }
+.poster-blank:hover { transform: none; border-color: var(--line); }
+.poster-initial {
+    font-size: 15px;
+    font-weight: 650;
+    color: var(--faint);
+    font-family: var(--f-mono);
+}
+
+.meta-card {
+    position: fixed;
+    z-index: 60;
+    width: 360px;
+    max-width: calc(100vw - 20px);
+    padding: 14px 16px;
+    background: var(--surface);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow);
+    /* Elle suit le pointeur : elle ne doit jamais l'intercepter en chemin. */
+    animation: mc-in 0.12s ease-out;
+}
+@keyframes mc-in { from { opacity: 0; transform: translateY(3px); } }
+@media (prefers-reduced-motion: reduce) {
+    .meta-card { animation: none; }
+    .poster { transition: none; }
+}
+
+.mc-top { display: flex; gap: 13px; align-items: flex-start; }
+.mc-info { min-width: 0; flex: 1; }
+.mc-poster {
+    display: block;
+    flex: none;
+    width: 92px;
+    /* Réserve la place avant le chargement : sans elle, la fiche est mesurée
+       trop courte et se retrouve mal positionnée à l'écran. */
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+    border-radius: var(--r-md);
+    border: 1px solid var(--line);
+}
+
+.mc-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.mc-title { font-size: 15px; line-height: 1.3; }
+.mc-year { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+.mc-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--faint);
+}
+.mc-facts span { padding: 1px 6px; border: 1px solid var(--line); border-radius: 3px; }
+.mc-rating { color: var(--amber); border-color: var(--amber-line) !important; }
+
+/* Le résumé est borné : certains synopsis font quinze lignes, et une fiche plus
+   haute que l'écran recouvre la ligne dont elle parle. */
+.mc-overview {
+    margin-top: 11px;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 7;
+    line-clamp: 7;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* Sur téléphone, il n'y a pas de « à côté » : la fiche devient un panneau bas. */
+@media (max-width: 620px) {
+    .meta-card {
+        left: 10px !important;
+        right: 10px;
+        bottom: 10px;
+        top: auto !important;
+        width: auto;
+    }
+    .mc-poster { width: 74px; }
+    .mc-overview { -webkit-line-clamp: 5; line-clamp: 5; }
+    .poster { width: 30px; height: 45px; }
+    .cell-title-row { gap: 9px; }
+}
+
+/* ---------- Bibliothèque ----------
+   Ici l'affiche n'est plus un repère dans une liste : c'est le sujet. On passe
+   donc de la ligne dense à une grille, format jaquette. */
+.lib-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: 14px;
+    padding: 14px 16px 24px;
+}
+
+.lib-card {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    transition: border-color 0.15s;
+}
+.lib-card:hover { border-color: var(--line-2); }
+
+/* La vignette hérite de .poster (survol, fiche) et n'en change que la taille. */
+.lib-poster { width: 62px; height: 93px; }
+
+.lib-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.lib-title {
+    font-size: 13.5px;
+    line-height: 1.35;
+    /* Un nom de release tient rarement sur une ligne, et le tronquer à un mot
+       près enlève justement la qualité qu'on cherchait à lire. */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.lib-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    color: var(--faint);
+    font-family: var(--f-mono);
+}
+.lib-ext { color: var(--muted); }
+
+.lib-actions { display: flex; align-items: center; gap: 6px; margin-top: auto; }
+.lib-nonweb {
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.03em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--muted);
+    border: 1px solid var(--line-2);
+    cursor: help;
+}
+
+/* Choix du téléviseur : une liste courte, posée sous le bouton. */
+.lib-actions { position: relative; }
+.cast-menu {
+    position: absolute;
+    z-index: 40;
+    bottom: calc(100% + 8px);
+    left: 0;
+    min-width: 240px;
+    max-width: min(320px, calc(100vw - 32px));
+    padding: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow);
+}
+.cast-head {
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--faint);
+    padding: 2px 6px 7px;
+}
+.cast-device {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    text-align: left;
+    padding: 7px 8px;
+    border: none;
+    border-radius: var(--r-sm);
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+.cast-device:hover { background: var(--surface); color: var(--amber); }
+.cast-device .muted { font-size: 11px; font-family: var(--f-mono); }
+/* L'avertissement n'est pas décoratif : sans lui, l'envoi « réussit » et rien
+   ne s'affiche sur la télévision. */
+.cast-warn {
+    margin: 0 0 7px;
+    padding: 7px 8px;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--warn);
+    background: rgba(232, 115, 90, 0.1);
+    border: 1px solid rgba(232, 115, 90, 0.3);
+    border-radius: var(--r-sm);
+}
+
+.lib-player { flex-basis: 100%; }
+.lib-video {
+    width: 100%;
+    max-height: 62vh;
+    display: block;
+    background: #000;
+    border-radius: var(--r-md);
+}
+
+@media (max-width: 640px) {
+    .lib-grid { grid-template-columns: 1fr; padding: 10px 10px 20px; gap: 10px; }
+    .lib-poster { width: 52px; height: 78px; }
+}
+
 /* ---------- Recherches enregistrées ---------- */
 .saved-chip { display: inline-flex; align-items: stretch; gap: 0; padding: 0; overflow: hidden; }
 .saved-run,
@@ -1242,4 +1485,30 @@ body.mask-on .maskable:hover { filter: none; }
         animation-iteration-count: 1 !important;
         transition-duration: 0.001ms !important;
     }
+}
+
+/* Une conversion se voit : le démarrage prend quelques secondes et la barre de
+   progression ne permet pas de se déplacer. Le dire évite de croire à un bug. */
+.lib-hint {
+    margin-top: 7px;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--faint);
+}
+
+/* Un fichier masqué reste visible quand on demande à les voir, mais en retrait :
+   il ne fait plus partie de la bibliothèque courante. */
+.lib-card.lib-hidden { opacity: 0.55; border-style: dashed; }
+.lib-card.lib-hidden:hover { opacity: 0.85; }
+.lib-remove { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+
+/* Barre du lecteur : « Arrêter » y est explicite, parce que mettre en pause ne
+   libère ni la connexion ni la conversion. */
+.lib-player-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 7px;
+    font-size: 11.5px;
 }

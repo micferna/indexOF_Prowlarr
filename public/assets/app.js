@@ -37,6 +37,8 @@ const ICONS = {
     trash: "M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14",
     close: "M18 6L6 18M6 6l12 12",
     files: "M3 7h6l2 2h10v10H3zM3 7V5h6l2 2",
+    cast: "M2 16a6 6 0 0 1 6 6M2 20a2 2 0 0 1 2 2M21 4H3v3M21 4v16h-9",
+    eye: "M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7zM12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6",
 };
 /* Une icône par application *arr : téléviseur, pellicule, note, livre. */
 const ARR_ICONS = {
@@ -108,7 +110,24 @@ const state = {
     view: "search", health: [], transfersTab: "live", transferFilter: "all", transfers: [], history: [],
     qbitNames: new Set(), store: false, notify: false, saved: [],
     user: "", admin: false, users: [],
+    // Fiches des médias : `posters` dit si le serveur peut en fournir
+    // (Radarr/Sonarr configurés), `postersOn` si l'utilisateur les veut.
+    posters: false, postersOn: true,
+    // Bibliothèque : ce qui est téléchargé et prêt à regarder.
+    library: false, files: [], filesLoaded: false, streamTtl: 43200,
+    // Fichiers masqués : cachés par défaut, révélables à la demande.
+    showHidden: false, hiddenCount: 0,
+    // Récepteurs Cast vus sur le réseau, et l'adresse que le téléviseur devra
+    // joindre pour venir chercher la vidéo.
+    castDevices: [], castScannedAt: null, castBase: "", castReachable: true,
+    // Conversion à la volée disponible côté serveur (ffmpeg présent).
+    transcode: false,
 };
+
+/* Fiches déjà connues, par titre de release. `null` = cherché, rien trouvé —
+   la distinction évite de redemander indéfiniment ce qui n'existe pas. */
+const metaCache = new Map();
+const metaPending = new Set();
 
 const $ = (s) => document.querySelector(s);
 const form = $("#search-form");
@@ -119,6 +138,9 @@ const catsBox = $("#categories");
 const chipsBox = $("#trackers");
 const maskBtn = $("#mask-toggle");
 const groupBtn = $("#group-toggle");
+const posterBtn = $("#poster-toggle");
+const libraryBtn = $("#library-btn");
+const metaCard = $("#meta-card");
 const topBtn = $("#top-btn");
 const transfersBtn = $("#transfers-btn");
 const accountBtn = $("#account-btn");
@@ -282,6 +304,24 @@ if (groupBtn) {
         // Rien à redemander au serveur : on regroupe ce qu'on a déjà.
         state.results = groupResults(state.rawResults);
         state.page = 1;
+        renderResults();
+    });
+}
+
+/* ---------- affiches ---------- */
+function applyPosters() {
+    if (!posterBtn) return;
+    // Le bouton n'apparaît que si le serveur sait fournir des fiches.
+    posterBtn.hidden = !state.posters;
+    posterBtn.setAttribute("aria-pressed", String(state.postersOn));
+    document.body.classList.toggle("posters-off", !state.postersOn);
+}
+if (posterBtn) {
+    posterBtn.addEventListener("click", () => {
+        state.postersOn = !state.postersOn;
+        try { localStorage.setItem("posters", state.postersOn ? "1" : "0"); } catch (e) {}
+        applyPosters();
+        hideMetaCard();
         renderResults();
     });
 }
@@ -689,6 +729,10 @@ function renderResults() {
     resultsBox.replaceChildren(...parts);
     observeMore(more);
     paintSelection(false);
+    hideMetaCard();
+    // Les fiches arrivent après coup : la liste s'affiche sans attendre
+    // Radarr/Sonarr, les vignettes se posent quand elles sont là.
+    hydrateMeta(shown);
 }
 
 function loadMore() {
@@ -886,6 +930,206 @@ function toggleSources(tr, others, btn) {
     btn.setAttribute("aria-expanded", "true");
 }
 
+/* ---------- fiches : vignette dans la ligne, fiche au survol ----------
+   Ce que ça remplace : ouvrir la page du tracker — donc s'y connecter — juste
+   pour savoir de quel film il s'agit. */
+
+/** Emplacement de la vignette d'une release, rempli dès la fiche connue. */
+function posterSlot(r) {
+    const box = el("div", { class: "poster" });
+    box.dataset.rel = r.title;
+    paintPosterSlot(box);
+    return box;
+}
+
+function paintPosterSlot(box) {
+    const titre = box.dataset.rel || "";
+    const m = metaCache.get(titre);
+    box.replaceChildren();
+    box.classList.toggle("poster-blank", !m || !m.poster);
+
+    if (m && m.poster) {
+        const img = el("img", {
+            src: "poster.php?t=" + encodeURIComponent(m.poster),
+            alt: m.title ? `Affiche de ${m.title}` : "", loading: "lazy", decoding: "async",
+        });
+        // Une affiche introuvable ne doit pas laisser d'icône cassée.
+        img.addEventListener("error", () => { img.remove(); box.classList.add("poster-blank"); });
+        box.append(img);
+    } else if (m) {
+        box.append(el("span", { class: "poster-initial", text: (m.title || "?").trim().charAt(0).toUpperCase() }));
+    }
+
+    if (!m) return;
+    box.tabIndex = 0;
+    box.setAttribute("role", "button");
+    box.setAttribute("aria-label", `Fiche de ${m.title}`);
+    box.title = m.title + (m.year ? ` (${m.year})` : "");
+}
+
+/**
+ * Complète les lignes affichées par leur fiche.
+ *
+ * Un seul aller-retour pour tout l'écran, et les titres qui désignent la même
+ * œuvre n'y comptent qu'une fois — quarante releases de Matrix, c'est une
+ * recherche côté Radarr, pas quarante.
+ */
+async function hydrateMeta(rows) {
+    if (!state.posters || !state.postersOn) return;
+
+    const lot = [];
+    const vus = new Set();
+    for (const r of rows) {
+        // Sans nature connue (musique, logiciels, livres), il n'y a pas de fiche
+        // à aller chercher : on n'interroge pas Radarr pour un album.
+        if (!r.kind || vus.has(r.title)) continue;
+        if (metaCache.has(r.title) || metaPending.has(r.title)) continue;
+        vus.add(r.title);
+        lot.push({ title: r.title, kind: r.kind, imdbId: r.imdbId || "", tmdbId: r.tmdbId || 0 });
+        if (lot.length >= 60) break;
+    }
+    if (!lot.length) return;
+
+    lot.forEach((i) => metaPending.add(i.title));
+    try {
+        const res = await fetch("api.php?action=meta", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
+            body: JSON.stringify(lot),
+        });
+        if (res.status === 401) { location.href = "login.php"; return; }
+        const data = await res.json();
+        if (data.enabled === false) { state.posters = false; applyPosters(); return; }
+
+        for (const [titre, fiche] of Object.entries(data.meta || {})) metaCache.set(titre, fiche);
+        // Un titre sans réponse est un titre sans fiche : on l'enregistre pour
+        // ne pas le redemander à chaque défilement.
+        for (const i of lot) if (!metaCache.has(i.title)) metaCache.set(i.title, null);
+        repaintPosters();
+    } catch (e) {
+        // Une fiche absente n'est pas une panne : la recherche reste utilisable.
+    } finally {
+        lot.forEach((i) => metaPending.delete(i.title));
+    }
+}
+
+function repaintPosters() {
+    for (const box of resultsBox.querySelectorAll(".poster")) paintPosterSlot(box);
+}
+
+/* La fiche est unique et se déplace : une par ligne encombrerait le document
+   pour rien, et il n'en est visible qu'une à la fois. */
+let metaTimer = null;
+let metaAnchor = null;
+
+function hideMetaCard() {
+    clearTimeout(metaTimer);
+    if (!metaCard) return;
+    metaCard.hidden = true;
+    metaCard.replaceChildren();
+    metaAnchor = null;
+}
+
+function showMetaCard(box) {
+    const m = metaCache.get(box.dataset.rel || "");
+    if (!metaCard || !m) return;
+    metaAnchor = box;
+
+    const entete = el("div", { class: "mc-head" },
+        el("b", { class: "mc-title", text: m.title }),
+        m.year ? el("span", { class: "mc-year", text: String(m.year) }) : null);
+
+    const faits = el("div", { class: "mc-facts" });
+    if (m.rating) faits.append(el("span", { class: "mc-rating", text: "★ " + m.rating.toFixed(1) }));
+    if (m.runtime) faits.append(el("span", { text: m.runtime + " min" }));
+    if (m.kind === "tv") faits.append(el("span", { text: "Série" }));
+    for (const g of m.genres || []) faits.append(el("span", { class: "mc-genre", text: g }));
+
+    // Affiche à gauche, texte à droite. Empilés, ils faisaient une fiche plus
+    // haute que l'écran, qui recouvrait la ligne dont elle parlait.
+    const info = el("div", { class: "mc-info" }, entete);
+    if (faits.childElementCount) info.append(faits);
+
+    const haut = el("div", { class: "mc-top" });
+    if (m.poster) {
+        haut.append(el("img", { class: "mc-poster",
+            src: "poster.php?t=" + encodeURIComponent(m.poster), alt: "", decoding: "async" }));
+    }
+    haut.append(info);
+
+    const parts = [haut];
+    if (m.overview) parts.push(el("p", { class: "mc-overview", text: m.overview }));
+
+    metaCard.replaceChildren(...parts);
+    metaCard.hidden = false;
+    placeMetaCard(box);
+}
+
+/** Place la fiche à côté de la vignette, du côté où il y a la place. */
+function placeMetaCard(box) {
+    const r = box.getBoundingClientRect();
+    const w = metaCard.offsetWidth;
+    const h = metaCard.offsetHeight;
+    const marge = 10;
+
+    // En dessous de 620 px de large, l'écran ne permet aucun « à côté » : la
+    // fiche devient un panneau bas, posé par la CSS.
+    if (window.innerWidth < 620) {
+        metaCard.style.left = "";
+        metaCard.style.top = "";
+        return;
+    }
+
+    let x = r.right + marge;
+    if (x + w > window.innerWidth - marge) x = Math.max(marge, r.left - w - marge);
+    let y = r.top + r.height / 2 - h / 2;
+    y = Math.max(marge, Math.min(y, window.innerHeight - h - marge));
+
+    metaCard.style.left = Math.round(x) + "px";
+    metaCard.style.top = Math.round(y) + "px";
+}
+
+/* Survol au pointeur, clic au doigt : la même fiche, deux gestes. Le délai
+   évite qu'elle clignote quand le curseur ne fait que traverser la liste. */
+resultsBox.addEventListener("pointerover", (e) => {
+    const box = e.target.closest(".poster");
+    if (!box || !metaCache.get(box.dataset.rel || "")) return;
+    if (e.pointerType === "touch" || box === metaAnchor) return;
+    clearTimeout(metaTimer);
+    metaTimer = setTimeout(() => showMetaCard(box), 140);
+});
+resultsBox.addEventListener("pointerout", (e) => {
+    const box = e.target.closest(".poster");
+    if (!box) return;
+    if (e.relatedTarget && (e.relatedTarget.closest(".poster") === box
+        || e.relatedTarget.closest("#meta-card"))) return;
+    clearTimeout(metaTimer);
+    metaTimer = setTimeout(hideMetaCard, 120);
+});
+resultsBox.addEventListener("click", (e) => {
+    const box = e.target.closest(".poster");
+    if (!box || !metaCache.get(box.dataset.rel || "")) return;
+    e.preventDefault();
+    if (box === metaAnchor && !metaCard.hidden) hideMetaCard(); else showMetaCard(box);
+});
+resultsBox.addEventListener("keydown", (e) => {
+    const box = e.target.closest(".poster");
+    if (!box || (e.key !== "Enter" && e.key !== " ")) return;
+    e.preventDefault();
+    if (box === metaAnchor && !metaCard.hidden) hideMetaCard(); else showMetaCard(box);
+});
+if (metaCard) {
+    metaCard.addEventListener("pointerleave", () => { metaTimer = setTimeout(hideMetaCard, 120); });
+    metaCard.addEventListener("pointerenter", () => clearTimeout(metaTimer));
+}
+// La fiche est posée en coordonnées d'écran : un défilement la laisserait
+// flotter loin de sa vignette.
+window.addEventListener("scroll", () => { if (metaAnchor) hideMetaCard(); }, { passive: true });
+document.addEventListener("click", (e) => {
+    if (metaAnchor && !e.target.closest(".poster") && !e.target.closest("#meta-card")) hideMetaCard();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && metaAnchor) hideMetaCard(); });
+
 function renderRow(r) {
     const tr = el("tr");
 
@@ -895,12 +1139,19 @@ function renderRow(r) {
     else if (badges.includes("1080p")) tr.classList.add("q-hd");
 
     const titleCell = el("td", { class: "cell-title" });
+    // Vignette et texte côte à côte dans un conteneur interne : la cellule
+    // elle-même reste une cellule de tableau, dont l'élision du titre dépend.
+    const ligne = el("div", { class: "cell-title-row" });
+    // La vignette n'a de sens que pour un film ou une série : ailleurs, elle ne
+    // ferait qu'un trou dans la colonne.
+    if (state.posters && state.postersOn && r.kind) ligne.append(posterSlot(r));
+    const corps = el("div", { class: "cell-title-body" });
     const linkable = r.infoUrl && r.infoUrl !== "#";
     const titleNode = linkable
         ? el("a", { class: "rel", href: r.infoUrl, target: "_blank", rel: "noopener noreferrer", title: r.title })
         : el("span", { class: "rel", title: r.title });
     titleNode.append(renderRelease(r.title));
-    titleCell.append(titleNode);
+    corps.append(titleNode);
 
     const meta = el("div", { class: "rel-meta" });
     meta.append(el("span", { class: "idx-tag maskable", text: r.indexer }));
@@ -934,7 +1185,9 @@ function renderRow(r) {
     } else if (state.qbitNames.has(normalizeName(r.title))) {
         meta.append(el("span", { class: "badge-have", title: "Déjà présent dans qBittorrent", text: "DANS QBIT" }));
     }
-    titleCell.append(meta);
+    corps.append(meta);
+    ligne.append(corps);
+    titleCell.append(ligne);
     tr.append(titleCell);
 
     tr.append(el("td", { class: "num" }, r.sizeHuman));
@@ -1070,8 +1323,19 @@ async function loadStatus() {
         state.arr = s.arr || {};
         state.store = !!s.store;
         state.notify = !!s.notify;
+        state.posters = !!s.posters;
+        state.library = !!s.library;
+        state.transcode = !!s.transcode;
+        if (libraryBtn) libraryBtn.hidden = !state.library;
         state.user = s.user || "";
         state.admin = !!s.admin;
+        applyPosters();
+        // Le statut arrive parfois après le premier rendu (recherche restaurée
+        // depuis l'URL) : sans ce rappel, les vignettes ne paraîtraient qu'à la
+        // recherche suivante.
+        if (state.posters && state.postersOn && state.view === "search" && state.results.length) {
+            renderResults();
+        }
         renderAccountButton();
         if (state.qbit) loadTransfers();
         if (state.store) loadSaved();
@@ -1167,9 +1431,11 @@ async function init() {
     try { const so = JSON.parse(localStorage.getItem("sort") || "null"); if (so && SORTABLE.includes(so.field) && (so.dir === "asc" || so.dir === "desc")) state.sort = so; } catch (e) {}
     try { state.qbitCategory = localStorage.getItem("qbitCat") || ""; } catch (e) {}
     try { state.grouping = localStorage.getItem("grouping") !== "0"; } catch (e) {}
+    try { state.postersOn = localStorage.getItem("posters") !== "0"; } catch (e) {}
     applyMask();
     applySafe();
     applyGrouping();
+    applyPosters();
     readUrl();
     if (state.mode === "top") state.sort = { field: "publishDate", dir: "desc" };
     renderDays();
@@ -1277,6 +1543,14 @@ function setView(view) {
         transfersTimer = setInterval(loadTransfers, 3000);
         renderTransfers();
     }
+    if (view === "library") {
+        renderLibrary();
+        // Relu à chaque ouverture : un téléchargement a pu se terminer entre-temps,
+        // et un téléviseur a pu être allumé.
+        loadCastDevices().then(() => loadLibrary());
+    }
+    if (view !== "library") { closeCastMenu(); stopAllPlayback(); }
+    if (libraryBtn) libraryBtn.classList.toggle("has-sel", view === "library");
     updateTransfersBadge();
 }
 
@@ -1559,6 +1833,403 @@ if (statusBox) {
 if (transfersBtn) {
     transfersBtn.addEventListener("click", () => {
         setView(state.view === "transfers" ? "search" : "transfers");
+        if (state.view === "search") renderResults();
+    });
+}
+
+/* ==================================================================
+   Bibliothèque
+
+   Ce qui a été téléchargé, prêt à regarder. Deux façons de lire, parce
+   qu'aucune ne suffit seule : le navigateur pour ce qu'il sait décoder
+   (MP4/WebM), et un lien à ouvrir dans VLC pour tout le reste — un MKV
+   en HEVC avec du DTS ne passera jamais dans un onglet, mais VLC le lit
+   sur n'importe quelle télévision.
+
+   Pas de transcodage : ce serait un autre projet, et ffmpeg sur un
+   NAS pour convertir 20 Go à la volée n'est pas une bonne idée.
+   ================================================================== */
+/* Carte en attente de confirmation de suppression (jeton de flux). */
+let pendingLibDelete = null;
+
+async function loadLibrary() {
+    try {
+        const res = await fetch("api.php?action=library" + (state.showHidden ? "&all=1" : ""));
+        if (res.status === 401) { location.href = "login.php"; return; }
+        const data = await res.json();
+        state.files = data.files || [];
+        state.hiddenCount = data.hiddenCount || 0;
+        state.streamTtl = data.ttl || state.streamTtl;
+        state.library = data.enabled !== false;
+    } catch (e) {
+        state.files = [];
+    }
+    state.filesLoaded = true;
+    if (state.view === "library") renderLibrary();
+}
+
+/**
+ * `p` demande la conversion si nécessaire, pour la cible indiquée : le serveur
+ * décide, sur les codecs réels, entre lecture directe, simple changement de
+ * conteneur et réencodage. Sans `p` (téléchargement, VLC), le fichier part tel
+ * qu'il est — VLC sait tout lire, le convertir serait du gâchis.
+ */
+function streamUrl(f, { download = false, profile = null } = {}) {
+    const p = { t: f.stream };
+    if (download) p.dl = "1";
+    if (profile) p.p = profile;
+    return "stream.php?" + new URLSearchParams(p).toString();
+}
+
+function renderLibrary() {
+    hideFacets();
+    observeMore(null);
+    hideMetaCard();
+    // Le re-rendu remplace les cartes : sans arrêt explicite, la vidéo est
+    // détachée du document mais sa conversion continue côté serveur.
+    stopAllPlayback();
+
+    if (!state.filesLoaded) {
+        resultsBox.replaceChildren(el("div", { class: "state" },
+            el("span", { class: "emoji", text: "📚" }), "Lecture du dossier de téléchargements…"));
+        return;
+    }
+    if (!state.files.length) {
+        resultsBox.replaceChildren(el("div", { class: "state" },
+            el("span", { class: "emoji", text: "📚" }),
+            "Rien de téléchargé pour l'instant. Ce que qBittorrent termine apparaîtra ici."));
+        return;
+    }
+
+    const total = state.files.reduce((n, f) => n + f.size, 0);
+    const meta = el("div", { class: "meta-row" },
+        el("span", {}, el("b", { text: String(state.files.length) }),
+            ` fichier${state.files.length > 1 ? "s" : ""}`),
+        el("span", { class: "muted", text: formatSize(total) }));
+    if (state.hiddenCount || state.showHidden) {
+        const b = el("button", { type: "button", class: "link-btn",
+            text: state.showHidden
+                ? "Masquer les fichiers cachés"
+                : `Afficher les ${state.hiddenCount} masqué${state.hiddenCount > 1 ? "s" : ""}` });
+        b.addEventListener("click", () => {
+            state.showHidden = !state.showHidden;
+            pendingLibDelete = null;
+            state.filesLoaded = false;
+            renderLibrary();
+            loadLibrary();
+        });
+        meta.append(el("span", { class: "meta-actions" }, b));
+    }
+
+    const grille = el("div", { class: "lib-grid" }, ...state.files.map(libraryCard));
+    resultsBox.replaceChildren(meta, grille);
+
+    // Mêmes fiches que dans la recherche : le nom du dossier de la release suffit
+    // à retrouver l'affiche.
+    hydrateMeta(state.files.map((f) => ({
+        title: f.title, kind: null, imdbId: "", tmdbId: 0,
+    })).map((x) => ({ ...x, kind: guessKind(x.title) })));
+}
+
+/** Film ou série ? Un marqueur de saison tranche, sinon c'est un film. */
+function guessKind(titre) {
+    return /(^|[\s._-])(s\d{1,2}(e\d{1,3})?|saison\s*\d|season\s*\d|\d{1,2}x\d{2})([\s._-]|$)/i.test(titre)
+        ? "tv" : "movie";
+}
+
+function libraryCard(f) {
+    const carte = el("article", { class: "lib-card" + (f.hidden ? " lib-hidden" : "") });
+
+    const vignette = el("div", { class: "lib-poster poster" });
+    vignette.dataset.rel = f.title;
+    paintPosterSlot(vignette);
+    carte.append(vignette);
+
+    const corps = el("div", { class: "lib-body" });
+    corps.append(el("div", { class: "lib-title", title: f.name }, renderRelease(f.name)));
+    corps.append(el("div", { class: "lib-meta" },
+        el("span", { text: f.sizeHuman }),
+        el("span", { class: "sep", text: "·" }),
+        el("span", { class: "lib-ext", text: f.ext.toUpperCase() })));
+
+    const actions = el("div", { class: "lib-actions" });
+
+    // Avec la conversion à la volée, tout est lisible : le serveur choisit entre
+    // lecture directe, changement de conteneur et réencodage. Sans elle, seuls
+    // les formats que le navigateur décode nativement sont proposés.
+    if (f.web || state.transcode) {
+        actions.append(makeBtn("act act-play", ICONS.play, f.web
+            ? "Lire dans le navigateur"
+            : "Lire dans le navigateur (converti à la volée)",
+            () => playHere(f, carte)));
+    } else {
+        actions.append(el("span", { class: "lib-nonweb",
+            title: "Ce format ne se lit pas dans un navigateur — passez par VLC",
+            text: "VLC requis" }));
+    }
+
+    // Envoi vers un téléviseur. Le bouton n'apparaît que si des récepteurs ont
+    // été vus : proposer d'envoyer dans le vide n'aide personne.
+    if (state.castDevices.length) {
+        actions.append(makeBtn("act act-cast", ICONS.cast, "Envoyer vers un téléviseur",
+            (btn) => openCastMenu(f, btn)));
+    }
+
+    actions.append(makeBtn("act act-copy", ICONS.copy, "Copier le lien de lecture (à ouvrir dans VLC)",
+        () => copyText(new URL(streamUrl(f), location.href).href,
+            "Lien copié — ouvrez-le dans VLC (Média › Ouvrir un flux réseau)")));
+    actions.append(el("a", { class: "act act-dl", href: streamUrl(f, { download: true }),
+        title: "Télécharger le fichier", "aria-label": "Télécharger le fichier" },
+        svgIcon(ICONS.download)));
+
+    actions.append(libraryRemoveActions(f));
+    corps.append(actions);
+    carte.append(corps);
+    return carte;
+}
+
+/**
+ * Retirer un fichier — deux gestes très différents, et c'est tout l'enjeu.
+ *
+ *   « Masquer »  : il disparaît de la liste, RIEN d'autre. Le fichier reste sur
+ *                  le disque et continue d'être partagé. Sur un tracker privé,
+ *                  désencombrer sa vue ne doit pas coûter son ratio.
+ *   « Supprimer »: qBittorrent retire le torrent ET le fichier. Le partage
+ *                  s'arrête, forcément.
+ *
+ * La confirmation se fait en deux temps, sans boîte de dialogue — comme dans la
+ * vue Transferts.
+ */
+function libraryRemoveActions(f) {
+    const wrap = el("span", { class: "lib-remove" });
+
+    if (pendingLibDelete === f.stream) {
+        const masquer = el("button", { type: "button", class: "del-choice", text: "Masquer",
+            title: "Retirer de la liste — le fichier reste partagé" });
+        masquer.addEventListener("click", () => libraryHide(f, true, masquer));
+
+        const supprimer = el("button", { type: "button", class: "del-choice danger", text: "+ fichier",
+            title: "Supprimer le torrent ET le fichier (le partage s'arrête)" });
+        supprimer.addEventListener("click", () => libraryDelete(f, supprimer));
+
+        const annuler = el("button", { type: "button", class: "act", title: "Annuler" });
+        annuler.append(svgIcon(ICONS.close));
+        annuler.addEventListener("click", () => { pendingLibDelete = null; renderLibrary(); });
+
+        wrap.append(masquer, supprimer, annuler);
+        return wrap;
+    }
+
+    if (f.hidden) {
+        wrap.append(makeBtn("act", ICONS.eye, "Réafficher dans la bibliothèque",
+            (btn) => libraryHide(f, false, btn)));
+        return wrap;
+    }
+
+    wrap.append(makeBtn("act act-del", ICONS.trash, "Retirer de la bibliothèque",
+        () => { pendingLibDelete = f.stream; renderLibrary(); }));
+    return wrap;
+}
+
+async function libraryHide(f, masquer, btn) {
+    pendingLibDelete = null;
+    btn.disabled = true;
+    try {
+        const res = await fetch("api.php?action=library-hide", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": CSRF },
+            body: new URLSearchParams({ token: f.stream, on: masquer ? "1" : "0" }).toString(),
+        });
+        const data = await res.json().catch(() => ({}));
+        toast(res.ok && data.ok ? data.message : (data.error || "Action impossible"));
+    } catch (e) {
+        toast("Action impossible");
+    }
+    state.filesLoaded = false;
+    renderLibrary();
+    loadLibrary();
+}
+
+async function libraryDelete(f, btn) {
+    pendingLibDelete = null;
+    btn.disabled = true;
+    btn.classList.add("busy");
+    try {
+        const res = await fetch("api.php?action=library-delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": CSRF },
+            body: new URLSearchParams({ token: f.stream }).toString(),
+        });
+        const data = await res.json().catch(() => ({}));
+        toast(res.ok && data.ok ? data.message : (data.error || "Suppression impossible"));
+    } catch (e) {
+        toast("Suppression impossible");
+    }
+    state.filesLoaded = false;
+    renderLibrary();
+    loadLibrary();
+}
+
+/** Lecture dans la page, sous la carte. */
+/**
+ * Arrête une lecture pour de bon.
+ *
+ * Retirer l'élément du DOM ne suffit pas : le navigateur peut garder la
+ * connexion ouverte, et côté serveur ffmpeg continue alors de convertir un film
+ * que plus personne ne regarde. Il faut vider la source et forcer un `load()` —
+ * c'est ce qui coupe le flux, et donc le processus.
+ */
+function stopPlayback(zone) {
+    if (!zone) return;
+    const video = zone.querySelector("video");
+    if (video) {
+        video.pause();
+        video.removeAttribute("src");
+        // Sans ce load(), la requête reste en vol et la conversion continue.
+        video.load();
+    }
+    zone.remove();
+}
+
+/** Arrête la lecture en cours, où qu'elle soit. */
+function stopAllPlayback() {
+    document.querySelectorAll(".lib-player").forEach(stopPlayback);
+}
+
+/** Lecture dans la page, sous la carte. */
+function playHere(f, carte) {
+    const existant = carte.querySelector(".lib-player");
+    if (existant) { stopPlayback(existant); return; }
+
+    // Une seule lecture à la fois : deux conversions simultanées pour un seul
+    // spectateur, c'est deux cœurs mobilisés pour rien.
+    stopAllPlayback();
+
+    const converti = !f.web && state.transcode;
+    const video = el("video", { class: "lib-video", controls: "", preload: "metadata",
+        playsinline: "", src: streamUrl(f, { profile: "browser" }) });
+    const zone = el("div", { class: "lib-player" }, video);
+
+    // Arrêter, et pas seulement mettre en pause : une pause laisse la connexion
+    // ouverte et la conversion en cours.
+    const barre = el("div", { class: "lib-player-bar" });
+    barre.append(el("span", { class: "muted", text: converti ? "Converti à la volée" : "Lecture directe" }));
+    const arret = el("button", { type: "button", class: "del-choice", text: "Arrêter",
+        title: "Arrêter la lecture et libérer la conversion" });
+    arret.addEventListener("click", () => stopPlayback(zone));
+    barre.append(arret);
+    zone.prepend(barre);
+
+    if (converti) {
+        // Un flux converti est produit au fil de l'eau : sa durée n'est pas
+        // connue d'avance, donc la barre de progression ne permet pas de se
+        // déplacer. Le dire évite de croire à un bug.
+        zone.append(el("div", { class: "lib-hint",
+            text: "Le démarrage prend quelques secondes, et le déplacement dans "
+                + "la vidéo n'est pas possible sur un flux converti." }));
+    }
+
+    // Un codec non supporté ne lève pas d'exception : la vidéo reste noire.
+    // Autant le dire, et proposer la sortie.
+    video.addEventListener("error", () => {
+        zone.replaceChildren(el("div", { class: "files-load" },
+            "Lecture impossible dans le navigateur. Copiez le lien et ouvrez-le dans VLC."));
+    });
+    carte.append(zone);
+    video.play().catch(() => {});
+}
+
+// Échap arrête la lecture : le geste attendu quand une vidéo occupe l'écran.
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && document.querySelector(".lib-player")) stopAllPlayback();
+});
+
+/* ---------- envoi vers un téléviseur ----------
+   Le Cast ne pousse pas la vidéo : il donne une URL au téléviseur, qui va la
+   chercher lui-même. Tout en dépend — d'où l'avertissement quand l'adresse de
+   l'app n'est joignable que depuis le serveur. */
+async function loadCastDevices() {
+    try {
+        const res = await fetch("api.php?action=cast-devices");
+        if (!res.ok) return;
+        const d = await res.json();
+        state.castDevices = d.devices || [];
+        state.castScannedAt = d.scannedAt || null;
+        state.castBase = d.base || "";
+        state.castReachable = d.reachable !== false;
+    } catch (e) { /* la bibliothèque reste utilisable sans Cast */ }
+}
+
+function closeCastMenu() {
+    const ouvert = document.querySelector(".cast-menu");
+    if (ouvert) ouvert.remove();
+}
+
+function openCastMenu(f, btn) {
+    const deja = btn.parentElement.querySelector(".cast-menu");
+    closeCastMenu();
+    if (deja) return;
+
+    const menu = el("div", { class: "cast-menu" });
+    menu.append(el("div", { class: "cast-head", text: "Envoyer vers…" }));
+
+    if (!state.castReachable) {
+        menu.append(el("div", { class: "cast-warn" },
+            `Le téléviseur ne pourra pas joindre l'application à « ${state.castBase} ». `
+            + "Renseignez PUBLIC_BASE_URL avec son adresse sur le réseau local."));
+    }
+    if (!f.web && !state.transcode) {
+        // Sans conversion, le récepteur Cast refusera : autant le dire avant.
+        menu.append(el("div", { class: "cast-warn" },
+            "Ce format passera probablement mal : un récepteur Cast ne lit que "
+            + "du H.264/AAC en MP4. VLC sur la télévision reste le chemin sûr."));
+    }
+
+    for (const d of state.castDevices) {
+        const ligne = el("button", { type: "button", class: "cast-device" },
+            el("b", { text: d.name }),
+            el("span", { class: "muted", text: d.model || d.host }));
+        ligne.addEventListener("click", () => { closeCastMenu(); castTo(f, d, btn); });
+        menu.append(ligne);
+    }
+
+    btn.parentElement.append(menu);
+}
+
+async function castTo(f, device, btn) {
+    btn.disabled = true;
+    btn.classList.add("busy");
+    const body = new URLSearchParams();
+    body.set("token", f.stream);
+    body.set("host", device.host);
+    body.set("port", String(device.port || 8009));
+    body.set("title", f.title || f.name);
+    const fiche = metaCache.get(f.title);
+    if (fiche && fiche.poster) body.set("poster", fiche.poster);
+
+    try {
+        const res = await fetch("api.php?action=cast", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": CSRF },
+            body: body.toString(),
+        });
+        const data = await res.json();
+        toast(data.error || data.message || "Envoyé.");
+    } catch (e) {
+        toast("Envoi impossible");
+    } finally {
+        btn.disabled = false;
+        btn.classList.remove("busy");
+    }
+}
+
+document.addEventListener("click", (e) => {
+    if (!e.target.closest(".cast-menu") && !e.target.closest(".act-cast")) closeCastMenu();
+});
+
+if (libraryBtn) {
+    libraryBtn.addEventListener("click", () => {
+        setView(state.view === "library" ? "search" : "library");
         if (state.view === "search") renderResults();
     });
 }
