@@ -118,7 +118,7 @@ jobs:
           skip-dirs: data,vendor
 
       - name: Publier le rapport dans Security
-        uses: github/codeql-action/upload-sarif@v4.37.3
+        uses: github/codeql-action/upload-sarif@v4.37.8
         with:
           sarif_file: trivy.sarif
           category: trivy
@@ -133,12 +133,12 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Initialiser CodeQL
-        uses: github/codeql-action/init@v4.37.3
+        uses: github/codeql-action/init@v4.37.8
         with:
           languages: javascript
           queries: security-and-quality
 
       - name: Analyser
-        uses: github/codeql-action/analyze@v4.37.3
+        uses: github/codeql-action/analyze@v4.37.8
         with:
           category: codeql-javascript
